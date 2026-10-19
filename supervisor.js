@@ -155,7 +155,7 @@ function handleVoiceEvent(event){
 }
 function configureVoiceTools(){
  // Keep the original server-provided personality: do not replace session.instructions.
- sendVoiceEvent({type:'session.update',session:{
+ sendVoiceEvent({type:'session.update',session:{type: 'realtime',
   tools:[{type:'function',name:ELIMINATION_TOOL,description:'Cuando el organizador ordene eliminar a un jugador y diga un código de una letra y cuatro dígitos, LLAMA a esta función. No vuelvas a pedir confirmación si ya tienes ambos datos. La función consulta Supabase y devuelve el resultado real.',parameters:{type:'object',properties:{jugador:{type:'integer',description:'ID numérico del jugador.'},codigo:{type:'string',description:'Código de una letra seguida de cuatro dígitos, por ejemplo T2233.'}},required:['jugador','codigo'],additionalProperties:false}}],
   tool_choice:'auto'
  }});
