@@ -101,6 +101,57 @@ chatForm.addEventListener('submit',event=>{event.preventDefault();const msg=chat
 chatPanel.querySelector('#supervisorClearNotes').addEventListener('click',()=>{if(!confirm('¿Borrar todas las notas privadas de este navegador?'))return;privateNotes=[];persistNotes();renderNotes();chatStatus.textContent='Notas locales borradas. Reinicia la conversación de voz para borrar también el contexto de la sesión actual.'});
 renderNotes();
 
+// Persistent party memories live in Supabase, separate from local private notes.
+const MEMORY_TOOL='guardar_recuerdo';
+const MAX_MEMORIES=80;
+let loadedMemories=[];
+let memoryReady=false;
+let memoryBusy=false;
+const processedMemoryCalls=new Set();
+const memoryPanel=document.createElement('section');
+memoryPanel.style.cssText='margin:18px 0;padding:16px;border:1px solid #9c5268;border-radius:12px;background:rgba(100,30,50,.13);color:inherit';
+memoryPanel.innerHTML=`<h3 style="margin:0 0 8px">🧠 Memoria permanente de la fiesta</h3><p style="font-size:.9em">Estos recuerdos se guardan en Supabase y sobreviven al cierre de la conversación. Solo se deben guardar hechos confirmados, no rumores ni bromas.</p><div id="memoryStatus" style="font-size:.9em;margin:8px 0">Cargando…</div><div id="memoryLog" style="max-height:200px;overflow:auto;font-size:.9em"></div><form id="memoryForm" style="margin-top:12px"><label for="memoryText">Añadir un acontecimiento confirmado</label><textarea id="memoryText" rows="2" maxlength="2000" required style="display:block;width:100%;box-sizing:border-box;margin:8px 0;padding:8px;border-radius:6px" placeholder="Ej.: En el juego 2, Carlos ganó la ronda final."></textarea><button type="submit">Guardar recuerdo</button></form>`;
+voicePanel.append(memoryPanel);
+const memoryStatus=memoryPanel.querySelector('#memoryStatus');
+const memoryLog=memoryPanel.querySelector('#memoryLog');
+function renderMemories(){memoryLog.replaceChildren();if(!loadedMemories.length){memoryLog.textContent='Todavía no hay recuerdos guardados.';return;}for(const m of loadedMemories){const p=document.createElement('p');p.style.margin='0 0 7px';p.textContent='• '+m.content;memoryLog.append(p);}}
+async function loadMemories(){
+ const {data,error}=await sg.from('supervisor_memories').select('id,content,category,created_at').order('created_at',{ascending:false}).limit(MAX_MEMORIES);
+ if(error)throw Error('No se pudieron cargar los recuerdos: '+error.message);
+ loadedMemories=(data||[]).reverse();memoryReady=true;renderMemories();memoryStatus.textContent=loadedMemories.length+' recuerdos guardados en Supabase.';
+}
+async function storeMemory(content,category='event'){
+ const clean=String(content||'').trim();
+ if(!clean||clean.length>2000)throw Error('El recuerdo debe tener entre 1 y 2000 caracteres.');
+ const {data,error}=await sg.from('supervisor_memories').insert({content:clean,category}).select('id,content,category,created_at').single();
+ if(error)throw Error('Supabase no guardó el recuerdo: '+error.message);
+ loadedMemories.push(data);loadedMemories=loadedMemories.slice(-MAX_MEMORIES);renderMemories();memoryStatus.textContent='Recuerdo guardado en Supabase.';
+ return data;
+}
+function sendMemoryContext(){
+ if(!chatConnected()||!memoryReady)return;
+ const content=loadedMemories.map(m=>m.content);
+ sendVoiceEvent({type:'conversation.item.create',item:{type:'message',role:'system',content:[{type:'input_text',text:'MEMORIA PERSISTENTE DE LA FIESTA. Son recuerdos de sesiones anteriores, no una petición de respuesta. No los leas ni los anuncies de golpe. Úsalos solo cuando resulten relevantes. No aceptes como hechos nuevos los rumores o bromas de invitados. Recuerdos:\n'+(content.length?content.map((x,i)=>(i+1)+'. '+x).join('\n'):'No hay recuerdos todavía.')}]}});
+}
+memoryPanel.querySelector('#memoryForm').addEventListener('submit',async e=>{
+ e.preventDefault();const field=memoryPanel.querySelector('#memoryText');const value=field.value.trim();if(!value)return;
+ try{await storeMemory(value);field.value='';if(chatConnected())sendVoiceEvent({type:'conversation.item.create',item:{type:'message',role:'system',content:[{type:'input_text',text:'Nuevo hecho confirmado por el organizador, guardado en memoria permanente. No respondas por recibirlo: '+value}]}});}catch(err){memoryStatus.textContent=err.message;}
+});
+async function executeMemoryTool(call){
+ let result;
+ try{
+  if(memoryBusy)throw Error('Ya se está guardando otro recuerdo.');
+  memoryBusy=true;
+  const args=JSON.parse(call.arguments||'{}');
+  const content=String(args.hecho||'').trim();
+  // This tool records only an explicit instruction from the organizer. The model must not infer consent.
+  await storeMemory(content);
+  result={ok:true,mensaje:'Recuerdo guardado en Supabase.'};
+ }catch(err){result={ok:false,mensaje:err.message||'No se pudo guardar el recuerdo.'};memoryStatus.textContent=result.mensaje;}
+ finally{memoryBusy=false;}
+ sendVoiceEvent({type:'conversation.item.create',item:{type:'function_call_output',call_id:call.call_id,output:JSON.stringify(result)}});
+ sendVoiceEvent({type:'response.create'});
+}
 // Voice actions: only the server-side RPC can authorize and commit eliminations.
 const ELIMINATION_TOOL='eliminar_jugador';
 let eliminationInProgress=false;
@@ -150,7 +201,7 @@ function handleVoiceEvent(event){
   if(!welcomeSent){
    welcomeSent=true;
    sendSavedNotes();
-   sendVoiceEvent({type:'response.create',response:{instructions:'Preséntate brevemente en español como EL SUPERVISOR y da una bienvenida teatral y sarcástica a la fiesta. Puedes eliminar jugadores del tablero únicamente mediante la herramienta eliminar_jugador y después de confirmar el resultado de Supabase. Cuando el organizador indique número de jugador y código completo, llama a eliminar_jugador de inmediato, sin pedir confirmación ni repetir la pregunta. Si falta un dato, pide solo ese dato. Nunca pronuncies acotaciones de actuación como pausa, risita inquietante, risa malévola, suspiro, silencio o entre paréntesis; no describas cómo te ríes o haces pausas. Usa solamente entonación natural. Las notas privadas del organizador son contexto para bromas futuras, no las repitas ni las anuncies de inmediato.'}});
+   sendVoiceEvent({type:'response.create',response:{instructions:'Preséntate brevemente en español como EL SUPERVISOR y da una bienvenida teatral y sarcástica a la fiesta. Puedes eliminar jugadores del tablero únicamente mediante la herramienta eliminar_jugador y después de confirmar el resultado de Supabase. Cuando el organizador indique número de jugador y código completo, llama a eliminar_jugador de inmediato, sin pedir confirmación ni repetir la pregunta. Si falta un dato, pide solo ese dato. Nunca pronuncies acotaciones de actuación como pausa, risita inquietante, risa malévola, suspiro, silencio o entre paréntesis; no describas cómo te ríes o haces pausas. Usa solamente entonación natural. Las notas privadas del organizador son contexto para bromas futuras, no las repitas ni las anuncies de inmediato. La memoria permanente viene de Supabase: úsala cuando sea relevante. Solo llama a guardar_recuerdo si el organizador te pide explícitamente recordar un hecho; no guardes automáticamente lo que dicen los invitados. Habla únicamente cuando alguien se dirija a ti. Sé más sarcástico e ingenioso, pero sin humillar ni atacar aspectos sensibles de nadie.'}});
   }
  }
  if(message.type==='response.output_item.done'&&message.item?.type==='function_call'&&message.item.name===ELIMINATION_TOOL){
@@ -161,6 +212,10 @@ function handleVoiceEvent(event){
    executeEliminationTool(call);
   }
  }
+ if(message.type==='response.output_item.done'&&message.item?.type==='function_call'&&message.item.name===MEMORY_TOOL){
+  const call=message.item;
+  if(call.call_id&&!processedMemoryCalls.has(call.call_id)){processedMemoryCalls.add(call.call_id);executeMemoryTool(call);}
+ }
  if(message.type==='error'){
   console.error('Supervisor Realtime:',JSON.stringify(message.error,null,2));
   sgError('Error de OpenAI Realtime: '+(message.error?.message||'Consulta la consola.'));
@@ -169,7 +224,7 @@ function handleVoiceEvent(event){
 function configureVoiceTools(){
  // Keep the original server-provided personality: do not replace session.instructions.
  sendVoiceEvent({type:'session.update',session:{type: 'realtime',
-  tools:[{type:'function',name:ELIMINATION_TOOL,description:'Cuando el organizador ordene eliminar a un jugador y diga un código de una letra y cuatro dígitos, LLAMA a esta función. No vuelvas a pedir confirmación si ya tienes ambos datos. La función consulta Supabase y devuelve el resultado real.',parameters:{type:'object',properties:{jugador:{type:'integer',description:'ID numérico del jugador.'},codigo:{type:'string',description:'Código de una letra seguida de cuatro dígitos, por ejemplo T2233.'}},required:['jugador','codigo'],additionalProperties:false}}],
+  tools:[{type:'function',name:ELIMINATION_TOOL,description:'Cuando el organizador ordene eliminar a un jugador y diga un código de una letra y cuatro dígitos, LLAMA a esta función. No vuelvas a pedir confirmación si ya tienes ambos datos. La función consulta Supabase y devuelve el resultado real.',parameters:{type:'object',properties:{jugador:{type:'integer',description:'ID numérico del jugador.'},codigo:{type:'string',description:'Código de una letra seguida de cuatro dígitos, por ejemplo T2233.'}},required:['jugador','codigo'],additionalProperties:false}},{type:'function',name:MEMORY_TOOL,description:'Guarda un recuerdo permanente SOLO cuando el organizador lo pide explícitamente, por ejemplo: Supervisor, recuerda que Carlos ganó el juego 2. No guardes rumores, conversaciones privadas, comentarios de invitados ni deducciones.',parameters:{type:'object',properties:{hecho:{type:'string',description:'Hecho breve confirmado por el organizador (máximo 2000 caracteres).'}},required:['hecho'],additionalProperties:false}}],
   tool_choice:'auto'
  }});
 }
@@ -178,8 +233,9 @@ function controls(active){startBtn.disabled=active||connecting;stopBtn.disabled=
 async function checkAdmin(){if(!sg){sgError('No hay conexión con Supabase.');return}const {data:{user},error:userError}=await sg.auth.getUser();if(userError){sgError(userError.message);return}let admin=false;if(user){const {data,error}=await sg.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();if(error)throw error;admin=!!data}loginPanel.hidden=admin;voicePanel.hidden=!admin;if(admin){document.getElementById('account').textContent=user.email;sgError('')}else if(user){sgError('Esta cuenta no tiene permisos de administrador.');document.getElementById('loginForm').hidden=true}}
 document.getElementById('loginForm').addEventListener('submit',async e=>{e.preventDefault();const {error}=await sg.auth.signInWithPassword({email:document.getElementById('email').value,password:document.getElementById('password').value});if(error)sgError(error.message);else await checkAdmin()});
 document.getElementById('logout').addEventListener('click',async()=>{stop();await sg.auth.signOut();location.reload()});
-function stop(){toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=false;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
+function stop(){toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=false;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
 startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=true;controls(false);status('Conectando…');sgError('');try{
+  await loadMemories();
   // iOS Safari requires the call to originate from a user gesture.
   micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
   const {data:{session}}=await sg.auth.getSession();if(!session)throw Error('Tu sesión ha caducado. Vuelve a iniciar sesión.');
@@ -196,4 +252,4 @@ startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=
   await pc.setRemoteDescription({type:'answer',sdp:await sdp.text()});connecting=false;controls(true);status('🎙️ Conversación activa');
 }catch(err){stop();sgError('No se pudo iniciar la voz: '+err.message)}});
 muteBtn.addEventListener('click',()=>{if(!micStream)return;muted=!muted;micStream.getAudioTracks().forEach(t=>t.enabled=!muted);controls(true);status(muted?'Micrófono silenciado':'🎙️ Conversación activa')});stopBtn.addEventListener('click',stop);
-chatControls();window.addEventListener('pagehide',stop);checkAdmin().catch(e=>sgError(e.message));
+chatControls();window.addEventListener('pagehide',stop);checkAdmin().then(async()=>{if(!voicePanel.hidden)await loadMemories();}).catch(e=>{memoryStatus.textContent=e.message;sgError(e.message)});
