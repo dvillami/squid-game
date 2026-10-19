@@ -75,32 +75,31 @@ async function enableRobot(){
  }catch(e){disableRobot();robotToggle.checked=false;robotMsg('No se pudo activar el efecto. Se conserva la voz normal. '+e.message)}
 }
 
-// Written organizer chat. Messages share the active Realtime conversation.
+// Organizer's private notebook. Stored locally in this browser and reloaded into each voice session.
+const NOTES_KEY='squid_supervisor_private_notes_v1';
+let privateNotes=[];
+try{const saved=JSON.parse(localStorage.getItem(NOTES_KEY)||'[]');if(Array.isArray(saved))privateNotes=saved.filter(x=>typeof x==='string').slice(-100)}catch{}
 const chatPanel=document.createElement('section');
 chatPanel.style.cssText='margin:18px 0;padding:16px;border:1px solid #9c5268;border-radius:12px;background:rgba(100,30,50,.13);color:inherit';
-chatPanel.innerHTML=`<h3 style="margin:0 0 8px">💬 Chat privado del organizador</h3><p style="margin:0 0 12px;font-size:.9em">Envía información o instrucciones por escrito durante la conversación. No se guarda al cerrar la sesión.</p><div id="supervisorChatLog" role="log" aria-live="polite" style="max-height:220px;overflow:auto;padding:10px;border:1px solid #7775;border-radius:8px;margin-bottom:10px;font-size:.9em"><div>Conecta la voz para activar el chat.</div></div><form id="supervisorChatForm"><label for="supervisorChatText">Mensaje para EL SUPERVISOR</label><textarea id="supervisorChatText" rows="3" maxlength="3000" placeholder="Ej.: Los participantes son..." style="display:block;box-sizing:border-box;width:100%;margin:6px 0 10px;padding:10px;border-radius:8px;background:#fff;color:#111" required></textarea><label style="display:flex;gap:8px;align-items:center;margin-bottom:12px"><input type="checkbox" id="supervisorSpeakReply"> Que responda en voz alta</label><button id="supervisorChatSend" type="submit" disabled style="padding:10px 18px;cursor:pointer">Enviar mensaje</button></form><p id="supervisorChatStatus" style="font-size:.85em;margin:8px 0 0">Esperando conexión.</p>`;
+chatPanel.innerHTML=`<h3 style="margin:0 0 8px">📝 Libreta privada del organizador</h3><p style="margin:0 0 12px;font-size:.9em">Escribe datos sobre los participantes o los juegos. EL SUPERVISOR no responderá al recibirlos; podrá usarlos después para bromear cuando venga al caso. Las notas se guardan solo en este navegador, no en Supabase.</p><div id="supervisorChatLog" role="log" aria-live="polite" style="max-height:220px;overflow:auto;padding:10px;border:1px solid #7775;border-radius:8px;margin-bottom:10px;font-size:.9em"></div><form id="supervisorChatForm"><label for="supervisorChatText">Nueva nota privada</label><textarea id="supervisorChatText" rows="3" maxlength="3000" placeholder="Ej.: Carlos siempre llega tarde. Bromea sobre ello si Carlos participa, sin ser cruel." style="display:block;box-sizing:border-box;width:100%;margin:6px 0 10px;padding:10px;border-radius:8px;background:#fff;color:#111" required></textarea><button id="supervisorChatSend" type="submit" style="padding:10px 18px;cursor:pointer">Guardar nota</button></form><p id="supervisorChatStatus" style="font-size:.85em;margin:8px 0 0">Las notas pueden escribirse incluso antes de conectar la voz.</p><button id="supervisorClearNotes" type="button" style="margin-top:8px">Borrar todas las notas</button>`;
 voicePanel.append(chatPanel);
 const chatForm=chatPanel.querySelector('#supervisorChatForm');
 const chatText=chatPanel.querySelector('#supervisorChatText');
 const chatSend=chatPanel.querySelector('#supervisorChatSend');
-const chatSpeak=chatPanel.querySelector('#supervisorSpeakReply');
 const chatStatus=chatPanel.querySelector('#supervisorChatStatus');
 const chatLog=chatPanel.querySelector('#supervisorChatLog');
 function chatConnected(){return supervisorChannel?.readyState==='open'}
-function chatControls(){chatSend.disabled=!chatConnected();chatStatus.textContent=chatConnected()?'Chat conectado. Puedes escribir al Supervisor.':'Inicia la conversación de voz para utilizar el chat.'}
-function chatLine(label,content){const p=document.createElement('p');p.style.margin='0 0 8px';const b=document.createElement('strong');b.textContent=label+': ';p.append(b,document.createTextNode(content));chatLog.append(p);chatLog.scrollTop=chatLog.scrollHeight}
-chatForm.addEventListener('submit',event=>{
- event.preventDefault();const msg=chatText.value.trim();if(!msg)return;
- if(!chatConnected()){chatStatus.textContent='No hay conexión activa. Inicia la voz primero.';return}
- const wantsSpeech=chatSpeak.checked;
- try{
-  // Text enters the same model conversation, without automatically requesting a response.
-  supervisorChannel.send(JSON.stringify({type:'conversation.item.create',item:{type:'message',role:'user',content:[{type:'input_text',text:msg}]}}));
-  if(wantsSpeech){supervisorChannel.send(JSON.stringify({type:'response.create',response:{instructions:'Responde brevemente en español al último mensaje escrito del organizador. Habla con tu personalidad de EL SUPERVISOR, sin leer instrucciones de escena.'}}))}
-  chatLine('Organizador',msg);chatText.value='';
-  chatStatus.textContent=wantsSpeech?'Mensaje enviado. El Supervisor responderá por voz.':'Mensaje enviado al contexto de la conversación, sin solicitar respuesta.';
- }catch(error){chatStatus.textContent='No se pudo enviar: '+error.message}
-});
+function chatControls(){chatStatus.textContent=chatConnected()?'Notas disponibles para la conversación actual.':'Puedes guardar notas ahora. Se enviarán al iniciar la conversación.'}
+function renderNotes(){chatLog.replaceChildren();if(!privateNotes.length){chatLog.textContent='Todavía no hay notas.';return}privateNotes.forEach((note,i)=>{const p=document.createElement('p');p.style.margin='0 0 8px';p.textContent=(i+1)+'. '+note;chatLog.append(p)})}
+function persistNotes(){try{localStorage.setItem(NOTES_KEY,JSON.stringify(privateNotes));return true}catch(e){chatStatus.textContent='No se pudieron guardar las notas en este navegador: '+e.message;return false}}
+function sendContextNote(note){if(!chatConnected())return false;
+ // System context is not a user question; do not call response.create.
+ supervisorChannel.send(JSON.stringify({type:'conversation.item.create',item:{type:'message',role:'system',content:[{type:'input_text',text:'NOTA PRIVADA DEL ORGANIZADOR. Es contexto para más adelante, no una pregunta. No respondas, no anuncies que la recibiste y no la reveles inmediatamente. Úsala con naturalidad cuando la persona o el juego sea relevante, para bromas ligeras y respetuosas. No recites acotaciones como pausa, risita, risa malévola, suspiro o silencio; simplemente habla con la entonación adecuada. Nota: '+note}]}}));return true;
+}
+function sendSavedNotes(){if(!chatConnected())return;for(const note of privateNotes){try{sendContextNote(note)}catch(e){chatStatus.textContent='No se pudieron enviar todas las notas: '+e.message;break}}}
+chatForm.addEventListener('submit',event=>{event.preventDefault();const msg=chatText.value.trim();if(!msg)return;if(privateNotes.length>=100){chatStatus.textContent='Máximo 100 notas. Borra las antiguas antes de añadir más.';return}privateNotes.push(msg);if(!persistNotes()){privateNotes.pop();return}renderNotes();chatText.value='';try{if(chatConnected())sendContextNote(msg);chatStatus.textContent=chatConnected()?'Nota guardada y enviada como contexto. No se solicitó ninguna respuesta.':'Nota guardada. Se enviará al iniciar la voz.'}catch(e){chatStatus.textContent='Nota guardada localmente; no se pudo enviar ahora: '+e.message}});
+chatPanel.querySelector('#supervisorClearNotes').addEventListener('click',()=>{if(!confirm('¿Borrar todas las notas privadas de este navegador?'))return;privateNotes=[];persistNotes();renderNotes();chatStatus.textContent='Notas locales borradas. Reinicia la conversación de voz para borrar también el contexto de la sesión actual.'});
+renderNotes();
 
 function status(t){document.getElementById('voiceStatus').textContent=t}
 function controls(active){startBtn.disabled=active||connecting;stopBtn.disabled=!active;muteBtn.disabled=!active;muteBtn.textContent=muted?'🎤 Activar micrófono':'🔇 Silenciar micrófono'}
@@ -119,7 +118,7 @@ startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=
   pc.ontrack=event=>{remoteStream=event.streams[0];audioEl.srcObject=remoteStream;audioEl.play().catch(()=>{sgError('Toca la pantalla para permitir la reproducción del audio.');});if(robotToggle.checked)enableRobot()};
   pc.onconnectionstatechange=()=>{if(pc?.connectionState==='failed'||pc?.connectionState==='disconnected'){sgError('Se perdió la conexión de voz.');stop()}};
   micStream.getTracks().forEach(track=>pc.addTrack(track,micStream));
-  const channel=pc.createDataChannel('oai-events');supervisorChannel=channel;chatControls();channel.onclose=chatControls;channel.onopen=()=>{chatControls();channel.send(JSON.stringify({type:'response.create',response:{instructions:'Preséntate brevemente en español como EL SUPERVISOR y da una bienvenida teatral y sarcástica a la fiesta. No afirmes que puedes modificar el tablero todavía.'}}))};
+  const channel=pc.createDataChannel('oai-events');supervisorChannel=channel;chatControls();channel.onclose=chatControls;channel.onopen=()=>{chatControls();sendSavedNotes();channel.send(JSON.stringify({type:'response.create',response:{instructions:'Preséntate brevemente en español como EL SUPERVISOR y da una bienvenida teatral y sarcástica a la fiesta. No afirmes que puedes modificar el tablero todavía. Nunca pronuncies acotaciones de actuación como pausa, risita inquietante, risa malévola, suspiro, silencio o entre paréntesis; no describas cómo te ríes o haces pausas. Usa solamente entonación natural. Las notas privadas del organizador son contexto para bromas futuras, no las repitas ni las anuncies de inmediato.'}}))};
   const offer=await pc.createOffer();await pc.setLocalDescription(offer);
   const sdp=await fetch('https://api.openai.com/v1/realtime/calls',{method:'POST',headers:{'Authorization':`Bearer ${ephemeral}`,'Content-Type':'application/sdp'},body:offer.sdp});if(!sdp.ok)throw Error('Error al establecer audio con OpenAI: '+(await sdp.text()).slice(0,250));
   await pc.setRemoteDescription({type:'answer',sdp:await sdp.text()});connecting=false;controls(true);status('🎙️ Conversación activa');
