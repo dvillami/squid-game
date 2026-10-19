@@ -3,12 +3,81 @@ const {sg,sgError}=window;
 const loginPanel=document.getElementById('loginPanel'),voicePanel=document.getElementById('voicePanel');
 const startBtn=document.getElementById('startVoice'),stopBtn=document.getElementById('stopVoice'),muteBtn=document.getElementById('muteVoice');
 let pc=null,micStream=null,audioEl=null,muted=false,connecting=false;
+// Independent, optional voice effect. Original audio remains the fallback.
+let robotCtx=null,robotSource=null,robotPitch=null,robotMetal=null,robotDelay=null,robotGain=null;
+let remoteStream=null,robotOn=false,robotReady=false;
+const robotPanel=document.createElement('section');
+robotPanel.style.cssText='margin:18px 0;padding:16px;border:1px solid #9c5268;border-radius:12px;background:rgba(100,30,50,.13);color:inherit';
+robotPanel.innerHTML=`<h3 style="margin:0 0 10px">🤖 Voz de máquina — prueba en directo</h3><label style="display:flex;gap:10px;align-items:center"><input id="robotToggle" type="checkbox"> Activar efecto robótico (voz normal de respaldo)</label><p style="margin:10px 0 0;font-size:.9em">Profundidad: <b>−7 semitonos</b> · Metal: <b>10 %</b> · Resonancia: <b>10 %</b></p><p id="robotStatus" style="font-size:.85em;margin:8px 0 0">Desactivado. El Supervisor usa la voz original.</p>`;
+voicePanel.append(robotPanel);
+const robotToggle=robotPanel.querySelector('#robotToggle');
+const robotStatus=robotPanel.querySelector('#robotStatus');
+robotToggle.addEventListener('change',async()=>{if(robotToggle.checked){await enableRobot()}else disableRobot()});
+function robotMsg(message){robotStatus.textContent=message}
+function disableRobot(){robotOn=false;if(audioEl)audioEl.muted=false;if(robotGain)robotGain.gain.value=0;robotMsg('Desactivado: voz original funcionando.');}
+function clearRobot(){disableRobot();remoteStream=null;robotReady=false;if(robotCtx){robotCtx.close().catch(()=>{});robotCtx=null}robotSource=robotPitch=robotMetal=robotDelay=robotGain=null;}
+const pitchWorkletSource=`
+class VoiceMachinePitch extends AudioWorkletProcessor {
+ constructor(){super();this.buf=new Float32Array(32768);this.write=0;this.t=0;this.grain=Math.max(1024,Math.round(sampleRate*.085));this.lag=this.grain*2;this.ratio=Math.pow(2,-7/12);}
+ sample(p){let n=this.buf.length;let a=((p%n)+n)%n;let i=Math.floor(a);let f=a-i;return this.buf[i]*(1-f)+this.buf[(i+1)%n]*f;}
+ process(inputs,outputs){const input=inputs[0],out=outputs[0];if(!out?.[0])return true;let src=input?.[0];for(let i=0;i<out[0].length;i++){
+ let x=src?.[i]||0;this.buf[this.write]=x;
+ let phase=this.t%this.grain,half=this.grain/2;
+ let read1=this.write-this.lag-phase+phase*this.ratio;
+ let phase2=(phase+half)%this.grain;
+ let read2=this.write-this.lag-phase2+phase2*this.ratio;
+ let w1=.5-.5*Math.cos(2*Math.PI*phase/this.grain),w2=.5-.5*Math.cos(2*Math.PI*phase2/this.grain);
+ let y=(this.sample(read1)*w1+this.sample(read2)*w2)/Math.max(.01,w1+w2);
+ for(const ch of out)ch[i]=y;
+ this.write=(this.write+1)%this.buf.length;this.t++;
+ }return true;}
+}registerProcessor('voice-machine-pitch',VoiceMachinePitch);`;
+async function setupRobot(){
+ if(robotReady||!remoteStream)return;
+ const Context=window.AudioContext||window.webkitAudioContext;
+ if(!Context||!window.AudioWorkletNode)throw Error('Este navegador no admite el procesador de voz.');
+ robotCtx=new Context();
+ const url=URL.createObjectURL(new Blob([pitchWorkletSource],{type:'application/javascript'}));
+ try{await robotCtx.audioWorklet.addModule(url)}finally{URL.revokeObjectURL(url)}
+ robotSource=robotCtx.createMediaStreamSource(remoteStream);
+ robotPitch=new AudioWorkletNode(robotCtx,'voice-machine-pitch');
+ const dry=robotCtx.createGain();dry.gain.value=.9;
+ const ring=robotCtx.createGain();ring.gain.value=.1;
+ const osc=robotCtx.createOscillator();osc.frequency.value=37;
+ const mod=robotCtx.createGain();mod.gain.value=.65;
+ osc.connect(mod);mod.connect(ring.gain);osc.start();
+ robotMetal=robotCtx.createBiquadFilter();robotMetal.type='lowpass';robotMetal.frequency.value=3900;
+ robotDelay=robotCtx.createDelay(.1);robotDelay.delayTime.value=.018;
+ const echoGain=robotCtx.createGain();echoGain.gain.value=.1;
+ robotGain=robotCtx.createGain();robotGain.gain.value=0;
+ robotSource.connect(robotPitch);
+ robotPitch.connect(dry);robotPitch.connect(ring);
+ dry.connect(robotMetal);ring.connect(robotMetal);
+ robotMetal.connect(robotGain);
+ robotMetal.connect(robotDelay);robotDelay.connect(echoGain);echoGain.connect(robotGain);
+ robotGain.connect(robotCtx.destination);
+ robotReady=true;
+}
+async function enableRobot(){
+ robotOn=true;
+ if(!remoteStream){robotMsg('Efecto preparado. Inicia la conversación para escucharlo.');return;}
+ try{
+  robotMsg('Preparando la voz grave…');
+  await setupRobot();
+  await robotCtx.resume();
+  if(robotCtx.state!=='running')throw Error('El navegador suspendió el audio.');
+  if(!robotOn)return;
+  robotGain.gain.value=.85;
+  if(audioEl)audioEl.muted=true;
+  robotMsg('ACTIVO: −7 semitonos, metal 10 %, resonancia 10 %. Si no se oye, desmarca la casilla.');
+ }catch(e){disableRobot();robotToggle.checked=false;robotMsg('No se pudo activar el efecto. Se conserva la voz normal. '+e.message)}
+}
 function status(t){document.getElementById('voiceStatus').textContent=t}
 function controls(active){startBtn.disabled=active||connecting;stopBtn.disabled=!active;muteBtn.disabled=!active;muteBtn.textContent=muted?'🎤 Activar micrófono':'🔇 Silenciar micrófono'}
 async function checkAdmin(){if(!sg){sgError('No hay conexión con Supabase.');return}const {data:{user},error:userError}=await sg.auth.getUser();if(userError){sgError(userError.message);return}let admin=false;if(user){const {data,error}=await sg.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();if(error)throw error;admin=!!data}loginPanel.hidden=admin;voicePanel.hidden=!admin;if(admin){document.getElementById('account').textContent=user.email;sgError('')}else if(user){sgError('Esta cuenta no tiene permisos de administrador.');document.getElementById('loginForm').hidden=true}}
 document.getElementById('loginForm').addEventListener('submit',async e=>{e.preventDefault();const {error}=await sg.auth.signInWithPassword({email:document.getElementById('email').value,password:document.getElementById('password').value});if(error)sgError(error.message);else await checkAdmin()});
 document.getElementById('logout').addEventListener('click',async()=>{stop();await sg.auth.signOut();location.reload()});
-function stop(){if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
+function stop(){clearRobot();robotToggle.checked=false;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
 startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=true;controls(false);status('Conectando…');sgError('');try{
   // iOS Safari requires the call to originate from a user gesture.
   micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
@@ -17,7 +86,7 @@ startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=
   const result=await response.json().catch(()=>({}));if(!response.ok)throw Error(result.error||`No se pudo crear la sesión (${response.status}).`);
   const ephemeral=result.client_secret?.value||result.value;if(!ephemeral)throw Error('OpenAI no devolvió una credencial temporal.');
   pc=new RTCPeerConnection();audioEl=document.createElement('audio');audioEl.autoplay=true;audioEl.playsInline=true;audioEl.style.display='none';document.body.append(audioEl);
-  pc.ontrack=event=>{audioEl.srcObject=event.streams[0];audioEl.play().catch(()=>{sgError('Toca la pantalla para permitir la reproducción del audio.');})};
+  pc.ontrack=event=>{remoteStream=event.streams[0];audioEl.srcObject=remoteStream;audioEl.play().catch(()=>{sgError('Toca la pantalla para permitir la reproducción del audio.');});if(robotToggle.checked)enableRobot()};
   pc.onconnectionstatechange=()=>{if(pc?.connectionState==='failed'||pc?.connectionState==='disconnected'){sgError('Se perdió la conexión de voz.');stop()}};
   micStream.getTracks().forEach(track=>pc.addTrack(track,micStream));
   const channel=pc.createDataChannel('oai-events');channel.onopen=()=>{channel.send(JSON.stringify({type:'response.create',response:{instructions:'Preséntate brevemente en español como EL SUPERVISOR y da una bienvenida teatral y sarcástica a la fiesta. No afirmes que puedes modificar el tablero todavía.'}}))};
