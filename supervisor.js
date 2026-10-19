@@ -101,6 +101,48 @@ chatForm.addEventListener('submit',event=>{event.preventDefault();const msg=chat
 chatPanel.querySelector('#supervisorClearNotes').addEventListener('click',()=>{if(!confirm('¿Borrar todas las notas privadas de este navegador?'))return;privateNotes=[];persistNotes();renderNotes();chatStatus.textContent='Notas locales borradas. Reinicia la conversación de voz para borrar también el contexto de la sesión actual.'});
 renderNotes();
 
+// Voice actions: only the server-side RPC can authorize and commit eliminations.
+const ELIMINATION_TOOL='eliminar_jugador';
+let eliminationInProgress=false;
+const eliminationInstructions=`Tienes una herramienta llamada eliminar_jugador para ejecutar eliminaciones en el tablero. Úsala SOLO si el organizador da una orden explícita de eliminar a un jugador y proporciona tanto el número de jugador como un código completo: una letra seguida de cuatro dígitos. No adivines datos faltantes. Solicita que repitan cualquier parte ambigua. No anuncies una eliminación antes de recibir el resultado de la herramienta. Si la herramienta informa un error, explica que NO se eliminó al jugador, sin inventar resultados. Nunca digas que un código incorrecto es válido. Los códigos solo se pueden usar una vez. No reveles ni expliques el algoritmo del código a los jugadores. No actives todavía ROMPE EL CÓDIGO: esa modalidad aún no está implementada. Mantén tu personalidad sarcástica sin leer acotaciones teatrales.`;
+function sendVoiceEvent(payload){if(chatConnected())supervisorChannel.send(JSON.stringify(payload));}
+async function executeEliminationTool(call){
+ let result;
+ try{
+  if(eliminationInProgress)throw Error('Hay otra eliminación en curso. Espera un momento.');
+  eliminationInProgress=true;
+  let args;
+  try{args=JSON.parse(call.arguments||'{}')}catch{throw Error('No se entendieron los datos de la orden. Repite jugador y código.');}
+  const player=Number(args.jugador);
+  const code=String(args.codigo??'').toUpperCase().replace(/\s+/g,'');
+  if(!Number.isSafeInteger(player)||player<1||!/^[A-Z][0-9]{4}$/.test(code))throw Error('Indica un número de jugador válido y un código de una letra seguida de cuatro cifras.');
+  const {data:{user},error:userError}=await sg.auth.getUser();
+  if(userError||!user)throw Error('La sesión del organizador ha caducado.');
+  const {data,error}=await sg.rpc('supervisor_eliminate',{p_player_id:player,p_code:code});
+  if(error)throw Error(error.message||'Supabase rechazó la eliminación.');
+  result={ok:true,jugador:player,mensaje:data||'Eliminación confirmada por Supabase.'};
+ }catch(err){result={ok:false,mensaje:err instanceof Error?err.message:'Error desconocido'};}
+ finally{eliminationInProgress=false;}
+ try{
+  sendVoiceEvent({type:'conversation.item.create',item:{type:'function_call_output',call_id:call.call_id,output:JSON.stringify(result)}});
+  sendVoiceEvent({type:'response.create'});
+ }catch(err){sgError('No se pudo comunicar el resultado al Supervisor: '+err.message);}
+}
+function handleVoiceEvent(event){
+ let message;
+ try{message=JSON.parse(event.data)}catch{return;}
+ if(message.type==='response.output_item.done'&&message.item?.type==='function_call'&&message.item.name===ELIMINATION_TOOL){
+  executeEliminationTool(message.item);
+ }
+ if(message.type==='error')console.warn('Supervisor Realtime:',message.error);
+}
+function configureVoiceTools(){
+ sendVoiceEvent({type:'session.update',session:{
+  instructions:eliminationInstructions,
+  tools:[{type:'function',name:ELIMINATION_TOOL,description:'Elimina del tablero a un participante por orden explícita del organizador, usando un código de autorización de un solo uso. Devuelve éxito o error real de Supabase.',parameters:{type:'object',properties:{jugador:{type:'integer',description:'Número identificador del jugador a eliminar.'},codigo:{type:'string',description:'Código dicho por el organizador: una letra seguida de cuatro dígitos, por ejemplo T2233.'}},required:['jugador','codigo'],additionalProperties:false}}],
+  tool_choice:'auto'
+ }});
+}
 function status(t){document.getElementById('voiceStatus').textContent=t}
 function controls(active){startBtn.disabled=active||connecting;stopBtn.disabled=!active;muteBtn.disabled=!active;muteBtn.textContent=muted?'🎤 Activar micrófono':'🔇 Silenciar micrófono'}
 async function checkAdmin(){if(!sg){sgError('No hay conexión con Supabase.');return}const {data:{user},error:userError}=await sg.auth.getUser();if(userError){sgError(userError.message);return}let admin=false;if(user){const {data,error}=await sg.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();if(error)throw error;admin=!!data}loginPanel.hidden=admin;voicePanel.hidden=!admin;if(admin){document.getElementById('account').textContent=user.email;sgError('')}else if(user){sgError('Esta cuenta no tiene permisos de administrador.');document.getElementById('loginForm').hidden=true}}
@@ -118,7 +160,7 @@ startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=
   pc.ontrack=event=>{remoteStream=event.streams[0];audioEl.srcObject=remoteStream;audioEl.play().catch(()=>{sgError('Toca la pantalla para permitir la reproducción del audio.');});if(robotToggle.checked)enableRobot()};
   pc.onconnectionstatechange=()=>{if(pc?.connectionState==='failed'||pc?.connectionState==='disconnected'){sgError('Se perdió la conexión de voz.');stop()}};
   micStream.getTracks().forEach(track=>pc.addTrack(track,micStream));
-  const channel=pc.createDataChannel('oai-events');supervisorChannel=channel;chatControls();channel.onclose=chatControls;channel.onopen=()=>{chatControls();sendSavedNotes();channel.send(JSON.stringify({type:'response.create',response:{instructions:'Preséntate brevemente en español como EL SUPERVISOR y da una bienvenida teatral y sarcástica a la fiesta. No afirmes que puedes modificar el tablero todavía. Nunca pronuncies acotaciones de actuación como pausa, risita inquietante, risa malévola, suspiro, silencio o entre paréntesis; no describas cómo te ríes o haces pausas. Usa solamente entonación natural. Las notas privadas del organizador son contexto para bromas futuras, no las repitas ni las anuncies de inmediato.'}}))};
+  const channel=pc.createDataChannel('oai-events');supervisorChannel=channel;chatControls();channel.onclose=chatControls;channel.onmessage=handleVoiceEvent;channel.onopen=()=>{chatControls();configureVoiceTools();sendSavedNotes();channel.send(JSON.stringify({type:'response.create',response:{instructions:'Preséntate brevemente en español como EL SUPERVISOR y da una bienvenida teatral y sarcástica a la fiesta. Puedes eliminar jugadores del tablero únicamente mediante la herramienta y después de confirmar el resultado de Supabase. Nunca pronuncies acotaciones de actuación como pausa, risita inquietante, risa malévola, suspiro, silencio o entre paréntesis; no describas cómo te ríes o haces pausas. Usa solamente entonación natural. Las notas privadas del organizador son contexto para bromas futuras, no las repitas ni las anuncies de inmediato.'}}))};
   const offer=await pc.createOffer();await pc.setLocalDescription(offer);
   const sdp=await fetch('https://api.openai.com/v1/realtime/calls',{method:'POST',headers:{'Authorization':`Bearer ${ephemeral}`,'Content-Type':'application/sdp'},body:offer.sdp});if(!sdp.ok)throw Error('Error al establecer audio con OpenAI: '+(await sdp.text()).slice(0,250));
   await pc.setRemoteDescription({type:'answer',sdp:await sdp.text()});connecting=false;controls(true);status('🎙️ Conversación activa');
