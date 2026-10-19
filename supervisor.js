@@ -3,6 +3,8 @@ const {sg,sgError}=window;
 const loginPanel=document.getElementById('loginPanel'),voicePanel=document.getElementById('voicePanel');
 const startBtn=document.getElementById('startVoice'),stopBtn=document.getElementById('stopVoice'),muteBtn=document.getElementById('muteVoice');
 let pc=null,micStream=null,audioEl=null,muted=false,connecting=false;
+let supervisorChannel=null;
+
 // Independent, optional voice effect. Original audio remains the fallback.
 let robotCtx=null,robotSource=null,robotPitch=null,robotMetal=null,robotDelay=null,robotGain=null;
 let remoteStream=null,robotOn=false,robotReady=false;
@@ -72,12 +74,40 @@ async function enableRobot(){
   robotMsg('ACTIVO: −7 semitonos, metal 10 %, resonancia 10 %. Si no se oye, desmarca la casilla.');
  }catch(e){disableRobot();robotToggle.checked=false;robotMsg('No se pudo activar el efecto. Se conserva la voz normal. '+e.message)}
 }
+
+// Written organizer chat. Messages share the active Realtime conversation.
+const chatPanel=document.createElement('section');
+chatPanel.style.cssText='margin:18px 0;padding:16px;border:1px solid #9c5268;border-radius:12px;background:rgba(100,30,50,.13);color:inherit';
+chatPanel.innerHTML=`<h3 style="margin:0 0 8px">💬 Chat privado del organizador</h3><p style="margin:0 0 12px;font-size:.9em">Envía información o instrucciones por escrito durante la conversación. No se guarda al cerrar la sesión.</p><div id="supervisorChatLog" role="log" aria-live="polite" style="max-height:220px;overflow:auto;padding:10px;border:1px solid #7775;border-radius:8px;margin-bottom:10px;font-size:.9em"><div>Conecta la voz para activar el chat.</div></div><form id="supervisorChatForm"><label for="supervisorChatText">Mensaje para EL SUPERVISOR</label><textarea id="supervisorChatText" rows="3" maxlength="3000" placeholder="Ej.: Los participantes son..." style="display:block;box-sizing:border-box;width:100%;margin:6px 0 10px;padding:10px;border-radius:8px;background:#fff;color:#111" required></textarea><label style="display:flex;gap:8px;align-items:center;margin-bottom:12px"><input type="checkbox" id="supervisorSpeakReply"> Que responda en voz alta</label><button id="supervisorChatSend" type="submit" disabled style="padding:10px 18px;cursor:pointer">Enviar mensaje</button></form><p id="supervisorChatStatus" style="font-size:.85em;margin:8px 0 0">Esperando conexión.</p>`;
+voicePanel.append(chatPanel);
+const chatForm=chatPanel.querySelector('#supervisorChatForm');
+const chatText=chatPanel.querySelector('#supervisorChatText');
+const chatSend=chatPanel.querySelector('#supervisorChatSend');
+const chatSpeak=chatPanel.querySelector('#supervisorSpeakReply');
+const chatStatus=chatPanel.querySelector('#supervisorChatStatus');
+const chatLog=chatPanel.querySelector('#supervisorChatLog');
+function chatConnected(){return supervisorChannel?.readyState==='open'}
+function chatControls(){chatSend.disabled=!chatConnected();chatStatus.textContent=chatConnected()?'Chat conectado. Puedes escribir al Supervisor.':'Inicia la conversación de voz para utilizar el chat.'}
+function chatLine(label,content){const p=document.createElement('p');p.style.margin='0 0 8px';const b=document.createElement('strong');b.textContent=label+': ';p.append(b,document.createTextNode(content));chatLog.append(p);chatLog.scrollTop=chatLog.scrollHeight}
+chatForm.addEventListener('submit',event=>{
+ event.preventDefault();const msg=chatText.value.trim();if(!msg)return;
+ if(!chatConnected()){chatStatus.textContent='No hay conexión activa. Inicia la voz primero.';return}
+ const wantsSpeech=chatSpeak.checked;
+ try{
+  // Text enters the same model conversation, without automatically requesting a response.
+  supervisorChannel.send(JSON.stringify({type:'conversation.item.create',item:{type:'message',role:'user',content:[{type:'input_text',text:msg}]}}));
+  if(wantsSpeech){supervisorChannel.send(JSON.stringify({type:'response.create',response:{instructions:'Responde brevemente en español al último mensaje escrito del organizador. Habla con tu personalidad de EL SUPERVISOR, sin leer instrucciones de escena.'}}))}
+  chatLine('Organizador',msg);chatText.value='';
+  chatStatus.textContent=wantsSpeech?'Mensaje enviado. El Supervisor responderá por voz.':'Mensaje enviado al contexto de la conversación, sin solicitar respuesta.';
+ }catch(error){chatStatus.textContent='No se pudo enviar: '+error.message}
+});
+
 function status(t){document.getElementById('voiceStatus').textContent=t}
 function controls(active){startBtn.disabled=active||connecting;stopBtn.disabled=!active;muteBtn.disabled=!active;muteBtn.textContent=muted?'🎤 Activar micrófono':'🔇 Silenciar micrófono'}
 async function checkAdmin(){if(!sg){sgError('No hay conexión con Supabase.');return}const {data:{user},error:userError}=await sg.auth.getUser();if(userError){sgError(userError.message);return}let admin=false;if(user){const {data,error}=await sg.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();if(error)throw error;admin=!!data}loginPanel.hidden=admin;voicePanel.hidden=!admin;if(admin){document.getElementById('account').textContent=user.email;sgError('')}else if(user){sgError('Esta cuenta no tiene permisos de administrador.');document.getElementById('loginForm').hidden=true}}
 document.getElementById('loginForm').addEventListener('submit',async e=>{e.preventDefault();const {error}=await sg.auth.signInWithPassword({email:document.getElementById('email').value,password:document.getElementById('password').value});if(error)sgError(error.message);else await checkAdmin()});
 document.getElementById('logout').addEventListener('click',async()=>{stop();await sg.auth.signOut();location.reload()});
-function stop(){clearRobot();robotToggle.checked=false;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
+function stop(){supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=false;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
 startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=true;controls(false);status('Conectando…');sgError('');try{
   // iOS Safari requires the call to originate from a user gesture.
   micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
@@ -89,10 +119,10 @@ startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=
   pc.ontrack=event=>{remoteStream=event.streams[0];audioEl.srcObject=remoteStream;audioEl.play().catch(()=>{sgError('Toca la pantalla para permitir la reproducción del audio.');});if(robotToggle.checked)enableRobot()};
   pc.onconnectionstatechange=()=>{if(pc?.connectionState==='failed'||pc?.connectionState==='disconnected'){sgError('Se perdió la conexión de voz.');stop()}};
   micStream.getTracks().forEach(track=>pc.addTrack(track,micStream));
-  const channel=pc.createDataChannel('oai-events');channel.onopen=()=>{channel.send(JSON.stringify({type:'response.create',response:{instructions:'Preséntate brevemente en español como EL SUPERVISOR y da una bienvenida teatral y sarcástica a la fiesta. No afirmes que puedes modificar el tablero todavía.'}}))};
+  const channel=pc.createDataChannel('oai-events');supervisorChannel=channel;chatControls();channel.onclose=chatControls;channel.onopen=()=>{chatControls();channel.send(JSON.stringify({type:'response.create',response:{instructions:'Preséntate brevemente en español como EL SUPERVISOR y da una bienvenida teatral y sarcástica a la fiesta. No afirmes que puedes modificar el tablero todavía.'}}))};
   const offer=await pc.createOffer();await pc.setLocalDescription(offer);
   const sdp=await fetch('https://api.openai.com/v1/realtime/calls',{method:'POST',headers:{'Authorization':`Bearer ${ephemeral}`,'Content-Type':'application/sdp'},body:offer.sdp});if(!sdp.ok)throw Error('Error al establecer audio con OpenAI: '+(await sdp.text()).slice(0,250));
   await pc.setRemoteDescription({type:'answer',sdp:await sdp.text()});connecting=false;controls(true);status('🎙️ Conversación activa');
 }catch(err){stop();sgError('No se pudo iniciar la voz: '+err.message)}});
 muteBtn.addEventListener('click',()=>{if(!micStream)return;muted=!muted;micStream.getAudioTracks().forEach(t=>t.enabled=!muted);controls(true);status(muted?'Micrófono silenciado':'🎙️ Conversación activa')});stopBtn.addEventListener('click',stop);
-window.addEventListener('pagehide',stop);checkAdmin().catch(e=>sgError(e.message));
+chatControls();window.addEventListener('pagehide',stop);checkAdmin().catch(e=>sgError(e.message));
