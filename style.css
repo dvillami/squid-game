@@ -71,3 +71,34 @@ body.board-page{background:radial-gradient(ellipse at 95% 10%,#57271e 0%,transpa
 .board-page .birthday-hero{min-height:55px;}
 .board-page .metrics strong{font-size:18px;}
 }
+
+/* MAYRA v3: pantalla compacta y QR lateral; no modifica estilos del administrador. */
+@media (min-width:700px){
+ body.board-page{height:100dvh;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+ .board-page .top{flex:0 0 auto;padding-top:7px;padding-bottom:7px}
+ .board-page .wrap{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:6px 14px 5px;max-width:1200px}
+ .board-page .birthday-hero{flex:0 0 auto;min-height:0;height:56px;padding:2px 82px;display:flex;align-items:center;justify-content:center}
+ .board-page .eyebrow{font-size:9px;line-height:1.1}
+ .board-page .hero h1{font-size:clamp(20px,2.4vw,31px);margin:2px 0;line-height:1.05}
+ .board-page .hero p{font-size:10px;line-height:1.1}
+ .board-page .qr-invite{position:absolute;right:0;top:1px;width:54px;padding:2px;gap:0}
+ .board-page .qr-invite img{width:48px;height:48px}
+ .board-page .qr-invite span{display:none}
+ .board-page .metrics{flex:0 0 auto;gap:8px;margin:4px 0}
+ .board-page .metrics>div{padding:3px 4px}
+ .board-page .metrics span{font-size:9px}
+ .board-page .metrics strong{font-size:19px;margin:0;line-height:1.1}
+ .board-page .bar{flex:0 0 auto;margin:3px 0 5px;min-height:22px}
+ .board-page .players{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-template-rows:repeat(3,minmax(0,1fr));gap:5px 10px}
+ .board-page .player{grid-column:span 2;min-height:0;display:flex;flex-direction:column}
+ .board-page .player:nth-child(7),.board-page .player:nth-child(12){grid-column:2 / span 2}
+ .board-page .photo{flex:1 1 auto;min-height:0;height:auto;aspect-ratio:auto}
+ .board-page .photo img{height:100%;width:100%;object-fit:cover}
+ .board-page .playerInfo{flex:0 0 auto;padding:3px 4px 4px}
+ .board-page .playerInfo strong{font-size:clamp(10px,1vw,13px);line-height:1.05}
+ .board-page .playerInfo span{font-size:8px;line-height:1.1;margin-top:2px}
+ .board-page .number{top:3px;left:3px;font-size:9px;padding:2px 4px}
+ .board-page .message{flex:0 0 auto;margin:0;min-height:0;font-size:11px}
+ .board-page footer{flex:0 0 auto;margin:2px 0 0;font-size:9px}
+}
+@media (max-width:699px){.board-page .qr-invite{width:80px}.board-page .qr-invite img{width:65px;height:65px}}
