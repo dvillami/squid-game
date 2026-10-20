@@ -4,6 +4,11 @@ const loginPanel=document.getElementById('loginPanel'),voicePanel=document.getEl
 const startBtn=document.getElementById('startVoice'),stopBtn=document.getElementById('stopVoice'),muteBtn=document.getElementById('muteVoice');
 let pc=null,micStream=null,audioEl=null,muted=false,connecting=false;
 let supervisorChannel=null;
+// The server must not cut off the Supervisor's speech for background noise.
+// Explicit requests are handled when the current response finishes.
+let supervisorSpeaking=false;
+let pendingAttention=false;
+
 
 // Independent, optional voice effect. Original audio remains the fallback.
 let robotCtx=null,robotSource=null,robotPitch=null,robotMetal=null,robotDelay=null,robotGain=null;
@@ -199,6 +204,8 @@ LÍMITES: jamás insultes, humilles o desprecies a los invitados. No hagas broma
 ESTILO: normalmente responde en dos a cuatro frases ágiles, con ritmo y personalidad. Varía el tono: serio cuando expliques reglas o anuncies decisiones; irónico cuando surja una ocasión graciosa; intrigante al crear expectativa. Evita discursos interminables, frases grandilocuentes, metáforas repetitivas, risas teatrales, muletillas de villano y acotaciones habladas como «pausa» o «risita». No expliques el chiste.
 CONDUCTA: habla solo cuando alguien se dirija a ti o el organizador te solicite una intervención. No interrumpas ni anuncies espontáneamente notas, recuerdos o expedientes. Mantén el misterio de tu identidad. En bienvenidas, transiciones, reglas y finales puedes extenderte moderadamente si te lo piden.
 HERRAMIENTAS: solo usa eliminar_jugador ante una orden explícita del organizador con número y código completos; no adivines, no pidas confirmación si ambos están claros, y nunca anuncies éxito antes de la respuesta real de Supabase. Si falla, di claramente que no se eliminó. No reveles cómo se validan los códigos. ROMPE EL CÓDIGO aún no está implementado. Solo usa guardar_recuerdo si el organizador pide expresamente guardar un hecho confirmado; no guardes automáticamente rumores ni comentarios de invitados. No reveles detalles técnicos internos.`;
+// Conversational policy complements the server-side no-barge-in setting.
+const interruptionPolicy=`REGLAS DE INTERRUPCIONES Y RUIDO: Mientras estés hablando, ignora murmullos, comentarios entre invitados y ruidos breves. Termina tu idea antes de responder a otra intervención. Cuando alguien te llame claramente «Supervisor» o «Un momento, Supervisor», atiéndelo con una frase irónica breve y amable, por ejemplo «Espero que sea importante lo que tiene que decir para interrumpirme». No repitas siempre la misma frase. Si los invitados están hablando demasiado y te piden recuperar el orden, reclama silencio con sarcasmo divertido, sin insultar. No finjas que puedes contar cuántas personas están hablando ni afirmar que escuchaste palabras que no entendiste. Después de una interrupción, retoma el tema si sigue siendo pertinente. Nunca ignores una instrucción clara del organizador para detener la conversación.`;
 const eliminationInstructions=`Tienes una herramienta llamada eliminar_jugador para ejecutar eliminaciones en el tablero. Úsala SOLO si el organizador da una orden explícita de eliminar a un jugador y proporciona tanto el número de jugador como un código completo: una letra seguida de cuatro dígitos. No adivines datos faltantes. Solicita que repitan cualquier parte ambigua. No anuncies una eliminación antes de recibir el resultado de la herramienta. Si la herramienta informa un error, explica que NO se eliminó al jugador, sin inventar resultados. Nunca digas que un código incorrecto es válido. Los códigos solo se pueden usar una vez. No reveles ni expliques el algoritmo del código a los jugadores. No actives todavía ROMPE EL CÓDIGO: esa modalidad aún no está implementada. Mantén tu personalidad sarcástica sin leer acotaciones teatrales.`;
 function sendVoiceEvent(payload){if(chatConnected())supervisorChannel.send(JSON.stringify(payload));}
 async function executeEliminationTool(call){
@@ -227,6 +234,15 @@ async function executeEliminationTool(call){
 function handleVoiceEvent(event){
  let message;
  try{message=JSON.parse(event.data)}catch{return;}
+ if(message.type==='response.created') supervisorSpeaking=true;
+ if(message.type==='response.done'){
+   supervisorSpeaking=false;
+   if(pendingAttention){pendingAttention=false;status('🎙️ Conversación activa · escuchando');}
+ }
+ if(message.type==='input_audio_buffer.speech_started' && supervisorSpeaking){
+   // Informative only. Do not cancel the active response.
+   pendingAttention=true;
+ }
  if(message.type==='session.created' && !toolsUpdateSent){
   toolsUpdateSent=true;
   console.info('Supervisor: sesión creada; configurando herramientas.');
@@ -265,7 +281,8 @@ function handleVoiceEvent(event){
 }
 function configureVoiceTools(){
  // Apply the updated character personality for this voice session.
- sendVoiceEvent({type:'session.update',session:{type: 'realtime',instructions:supervisorPersonality,
+ sendVoiceEvent({type:'session.update',session:{type: 'realtime',instructions:supervisorPersonality+'\n\n'+interruptionPolicy,
+   turn_detection:{type:'server_vad',threshold:0.75,prefix_padding_ms:350,silence_duration_ms:850,create_response:true,interrupt_response:false},
   tools:[{type:'function',name:ELIMINATION_TOOL,description:'Cuando el organizador ordene eliminar a un jugador y diga un código de una letra y cuatro dígitos, LLAMA a esta función. No vuelvas a pedir confirmación si ya tienes ambos datos. La función consulta Supabase y devuelve el resultado real.',parameters:{type:'object',properties:{jugador:{type:'integer',description:'ID numérico del jugador.'},codigo:{type:'string',description:'Código de una letra seguida de cuatro dígitos, por ejemplo T2233.'}},required:['jugador','codigo'],additionalProperties:false}},{type:'function',name:MEMORY_TOOL,description:'Guarda un recuerdo permanente SOLO cuando el organizador lo pide explícitamente, por ejemplo: Supervisor, recuerda que Carlos ganó el juego 2. No guardes rumores, conversaciones privadas, comentarios de invitados ni deducciones.',parameters:{type:'object',properties:{hecho:{type:'string',description:'Hecho breve confirmado por el organizador (máximo 2000 caracteres).'}},required:['hecho'],additionalProperties:false}}],
   tool_choice:'auto'
  }});
@@ -275,7 +292,7 @@ function controls(active){startBtn.disabled=active||connecting;stopBtn.disabled=
 async function checkAdmin(){if(!sg){sgError('No hay conexión con Supabase.');return}const {data:{user},error:userError}=await sg.auth.getUser();if(userError){sgError(userError.message);return}let admin=false;if(user){const {data,error}=await sg.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();if(error)throw error;admin=!!data}loginPanel.hidden=admin;voicePanel.hidden=!admin;if(admin){document.getElementById('account').textContent=user.email;sgError('')}else if(user){sgError('Esta cuenta no tiene permisos de administrador.');document.getElementById('loginForm').hidden=true}}
 document.getElementById('loginForm').addEventListener('submit',async e=>{e.preventDefault();const {error}=await sg.auth.signInWithPassword({email:document.getElementById('email').value,password:document.getElementById('password').value});if(error)sgError(error.message);else await checkAdmin()});
 document.getElementById('logout').addEventListener('click',async()=>{stop();await sg.auth.signOut();location.reload()});
-function stop(){toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=false;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
+function stop(){supervisorSpeaking=false;pendingAttention=false;toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=false;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
 startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=true;controls(false);status('Conectando…');sgError('');try{
    await loadMemories();
    try{await loadParticipantDossiers()}catch(err){console.warn('Supervisor: expedientes no disponibles:',err);sgError('Aviso: los expedientes no se pudieron cargar. La voz puede funcionar sin ellos. '+err.message)}
