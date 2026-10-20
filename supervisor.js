@@ -316,7 +316,7 @@ function handleVoiceEvent(event){
 function configureVoiceTools(){
  // Apply the updated character personality for this voice session.
  sendVoiceEvent({type:'session.update',session:{type: 'realtime',instructions:fullSupervisorInstructions(),
-   turn_detection:{type:'server_vad',threshold:0.75,prefix_padding_ms:350,silence_duration_ms:850,create_response:true,interrupt_response:false},
+   audio:{input:{turn_detection:{type:'server_vad',threshold:0.75,prefix_padding_ms:350,silence_duration_ms:850,create_response:true,interrupt_response:false}}},
   tools:[{type:'function',name:ELIMINATION_TOOL,description:'Cuando el organizador ordene eliminar a un jugador y diga un código de una letra y cuatro dígitos, LLAMA a esta función. No vuelvas a pedir confirmación si ya tienes ambos datos. La función consulta Supabase y devuelve el resultado real.',parameters:{type:'object',properties:{jugador:{type:'integer',description:'ID numérico del jugador.'},codigo:{type:'string',description:'Código de una letra seguida de cuatro dígitos, por ejemplo T2233.'}},required:['jugador','codigo'],additionalProperties:false}},{type:'function',name:MEMORY_TOOL,description:'Guarda un recuerdo permanente SOLO cuando el organizador lo pide explícitamente, por ejemplo: Supervisor, recuerda que Carlos ganó el juego 2. No guardes rumores, conversaciones privadas, comentarios de invitados ni deducciones.',parameters:{type:'object',properties:{hecho:{type:'string',description:'Hecho breve confirmado por el organizador (máximo 2000 caracteres).'}},required:['hecho'],additionalProperties:false}}],
   tool_choice:'auto'
  }});
