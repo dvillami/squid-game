@@ -102,3 +102,18 @@ body.board-page{background:radial-gradient(ellipse at 95% 10%,#57271e 0%,transpa
  .board-page footer{flex:0 0 auto;margin:2px 0 0;font-size:9px}
 }
 @media (max-width:699px){.board-page .qr-invite{width:80px}.board-page .qr-invite img{width:65px;height:65px}}
+
+/* Aviso de eliminacion flotante, independiente de la cuadricula y de la pagina admin. */
+.elimination-notice[hidden]{display:none!important}
+.elimination-notice{position:fixed;z-index:9999;top:50%;left:50%;width:min(430px,calc(100vw - 28px));transform:translate(-50%,-45%) scale(.94);opacity:0;pointer-events:none;background:linear-gradient(140deg,#291321,#100f1a 70%);border:2px solid #ff347c;border-radius:16px;box-shadow:0 12px 60px #000c,0 0 30px #ff347c66;color:white;overflow:hidden;transition:opacity .4s ease,transform .4s ease}
+.elimination-notice.visible{opacity:1;transform:translate(-50%,-50%) scale(1)}
+.notice-head{padding:11px 14px;background:#47152b;text-align:center;font-size:12px;font-weight:900;letter-spacing:2px;color:#ff86ac}
+.notice-body{display:flex;align-items:center;gap:16px;padding:20px}
+.notice-photo{width:108px;height:128px;flex:0 0 108px;background:#222d30;border:1px solid #b64268;border-radius:9px;overflow:hidden;display:grid;place-items:center;font-size:55px;color:#678e86}
+.notice-photo img{width:100%;height:100%;object-fit:cover;filter:grayscale(1) brightness(.72)}
+.notice-copy{min-width:0}.notice-number{font-size:13px;letter-spacing:2px;color:#ddd0da}.notice-name{display:block;font-size:clamp(19px,3vw,27px);line-height:1.15;margin:7px 0;overflow-wrap:anywhere}.notice-out{font-size:25px;font-weight:1000;color:#ff347c;letter-spacing:2px}.notice-copy p{font-size:12px;color:#d4bdcb;line-height:1.5;margin:10px 0 0}
+.notice-progress{height:5px;background:#ff347c;transform-origin:left;animation:notice-countdown 5s linear both}
+.elimination-notice.visible .notice-progress{animation:notice-countdown 5s linear both}
+@keyframes notice-countdown{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+@media(max-width:480px){.notice-body{padding:14px;gap:12px}.notice-photo{width:84px;height:105px;flex-basis:84px}.notice-out{font-size:20px}.notice-head{font-size:10px}}
+@media(prefers-reduced-motion:reduce){.elimination-notice{transition:none}.notice-progress{animation:none!important}}
