@@ -19,6 +19,8 @@ let supervisorChannel=null;
 // Explicit requests are handled when the current response finishes.
 let supervisorSpeaking=false;
 let pendingAttention=false;
+let interruptionRequested=false;
+let speakingGuardUntil=0;
 
 
 // Independent, optional voice effect. Original audio remains the fallback.
@@ -277,7 +279,7 @@ async function executeEliminationTool(call){
 function handleVoiceEvent(event){
  let message;
  try{message=JSON.parse(event.data)}catch{return;}
- if(message.type==='response.created'){supervisorSpeaking=true;syncMicDuringSpeech();}
+ if(message.type==='response.created'){interruptionRequested=false;supervisorSpeaking=true;syncMicDuringSpeech();}
  if(message.type==='response.done'){
    supervisorSpeaking=false;syncMicDuringSpeech();
    if(pendingAttention){pendingAttention=false;status('🎙️ Conversación activa · escuchando');}
@@ -334,14 +336,14 @@ function configureVoiceTools(){
 function syncMicDuringSpeech(){
  // Hard anti-interruption mode: remote voice cannot be interrupted by room noise.
  // Deliberate calls must wait for the Supervisor to finish speaking.
- if(micStream)micStream.getAudioTracks().forEach(t=>{t.enabled=!muted&&!supervisorSpeaking});
+ if(micStream)micStream.getAudioTracks().forEach(t=>{t.enabled=!muted&&!supervisorSpeaking&&!interruptionRequested});
 }
 function status(t){document.getElementById('voiceStatus').textContent=t}
 function controls(active){if(interruptBtn)interruptBtn.disabled=!active;startBtn.disabled=active||connecting;stopBtn.disabled=!active;muteBtn.disabled=!active;muteBtn.textContent=muted?'🎤 Activar micrófono':'🔇 Silenciar micrófono'}
 async function checkAdmin(){if(!sg){sgError('No hay conexión con Supabase.');return}const {data:{user},error:userError}=await sg.auth.getUser();if(userError){sgError(userError.message);return}let admin=false;if(user){const {data,error}=await sg.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();if(error)throw error;admin=!!data}loginPanel.hidden=admin;voicePanel.hidden=!admin;if(admin){document.getElementById('account').textContent=user.email;sgError('')}else if(user){sgError('Esta cuenta no tiene permisos de administrador.');document.getElementById('loginForm').hidden=true}}
 document.getElementById('loginForm').addEventListener('submit',async e=>{e.preventDefault();const {error}=await sg.auth.signInWithPassword({email:document.getElementById('email').value,password:document.getElementById('password').value});if(error)sgError(error.message);else await checkAdmin()});
 document.getElementById('logout').addEventListener('click',async()=>{stop();await sg.auth.signOut();location.reload()});
-function stop(){supervisorSpeaking=false;pendingAttention=false;toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=true;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
+function stop(){interruptionRequested=false;supervisorSpeaking=false;pendingAttention=false;toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=true;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
 startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=true;controls(false);status('Conectando…');sgError('');try{
    await loadMemories();
    try{await loadParticipantDossiers()}catch(err){console.warn('Supervisor: expedientes no disponibles:',err);sgError('Aviso: los expedientes no se pudieron cargar. La voz puede funcionar sin ellos. '+err.message)}
@@ -361,6 +363,26 @@ startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=
   await pc.setRemoteDescription({type:'answer',sdp:await sdp.text()});connecting=false;controls(true);status('🎙️ Conversación activa');
 }catch(err){stop();sgError('No se pudo iniciar la voz: '+err.message)}});
 reloadGuestMemoriesBtn?.addEventListener('click',async()=>{reloadGuestMemoriesBtn.disabled=true;try{await loadMemories();if(chatConnected())sendMemoryContext();status('🧠 Memoria permanente actualizada: '+loadedMemories.length+' recuerdos');}catch(err){sgError('No se pudieron actualizar recuerdos: '+err.message)}finally{reloadGuestMemoriesBtn.disabled=false}});
-interruptBtn?.addEventListener('click',()=>{if(!chatConnected())return; if(supervisorSpeaking){sendVoiceEvent({type:'response.cancel'}); if(audioEl&&audioEl.srcObject){try{sendVoiceEvent({type:'output_audio_buffer.clear'})}catch{}} supervisorSpeaking=false;} syncMicDuringSpeech(); status('✋ Interrupción solicitada · te escucho');});
+interruptBtn?.addEventListener('click',()=>{
+ if(!chatConnected())return;
+ // Silence local playback instantly; cancel the model's ongoing answer separately.
+ interruptionRequested=true;
+ if(audioEl)audioEl.muted=true;
+ if(robotGain)robotGain.gain.value=0;
+ if(supervisorSpeaking){sendVoiceEvent({type:'response.cancel'});}
+ // WebRTC audio buffers can contain already-generated speech. Keep the output
+ // muted until the server confirms completion; a fallback releases the mic.
+ supervisorSpeaking=false;
+ syncMicDuringSpeech();
+ status('✋ Interrupción solicitada · espera un instante');
+ setTimeout(()=>{
+  if(!chatConnected()||!interruptionRequested)return;
+  interruptionRequested=false;
+  if(audioEl)audioEl.muted=!!robotOn;
+  if(robotGain)robotGain.gain.value=robotOn?.85:0;
+  syncMicDuringSpeech();
+  status('🎙️ Conversación activa · te escucho');
+ },900);
+});
 muteBtn.addEventListener('click',()=>{if(!micStream)return;muted=!muted;syncMicDuringSpeech();controls(true);status(muted?'Micrófono silenciado':'🎙️ Conversación activa')});stopBtn.addEventListener('click',stop);
 chatControls();window.addEventListener('pagehide',stop);checkAdmin().then(async()=>{if(!voicePanel.hidden)await loadMemories();}).catch(e=>{memoryStatus.textContent=e.message;sgError(e.message)});
