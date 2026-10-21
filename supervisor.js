@@ -2,8 +2,17 @@
 const {sg,sgError}=window;
 const loginPanel=document.getElementById('loginPanel'),voicePanel=document.getElementById('voicePanel');
 const startBtn=document.getElementById('startVoice'),stopBtn=document.getElementById('stopVoice'),muteBtn=document.getElementById('muteVoice');
-const interruptBtn=document.getElementById('interruptVoice');
+let interruptBtn=document.getElementById('interruptVoice');
 const reloadGuestMemoriesBtn=document.getElementById('reloadGuestMemories');
+if(!interruptBtn && startBtn){
+  const newInterruptBtn=document.createElement('button');
+  newInterruptBtn.id='interruptVoice';
+  newInterruptBtn.type='button';
+  newInterruptBtn.textContent='✋ Interrumpir';
+  newInterruptBtn.disabled=true;
+  startBtn.insertAdjacentElement('afterend',newInterruptBtn);
+  interruptBtn=newInterruptBtn;
+}
 let pc=null,micStream=null,audioEl=null,muted=false,connecting=false;
 let supervisorChannel=null;
 // The server must not cut off the Supervisor's speech for background noise.
@@ -21,6 +30,7 @@ robotPanel.innerHTML=`<h3 style="margin:0 0 10px">🤖 Voz de máquina — prueb
 voicePanel.append(robotPanel);
 const robotToggle=robotPanel.querySelector('#robotToggle');
 const robotStatus=robotPanel.querySelector('#robotStatus');
+robotToggle.checked=true;
 robotToggle.addEventListener('change',async()=>{if(robotToggle.checked){await enableRobot()}else disableRobot()});
 function robotMsg(message){robotStatus.textContent=message}
 function disableRobot(){robotOn=false;if(audioEl)audioEl.muted=false;if(robotGain)robotGain.gain.value=0;robotMsg('Desactivado: voz original funcionando.');}
@@ -327,11 +337,11 @@ function syncMicDuringSpeech(){
  if(micStream)micStream.getAudioTracks().forEach(t=>{t.enabled=!muted&&!supervisorSpeaking});
 }
 function status(t){document.getElementById('voiceStatus').textContent=t}
-function controls(active){interruptBtn.disabled=!active;startBtn.disabled=active||connecting;stopBtn.disabled=!active;muteBtn.disabled=!active;muteBtn.textContent=muted?'🎤 Activar micrófono':'🔇 Silenciar micrófono'}
+function controls(active){if(interruptBtn)interruptBtn.disabled=!active;startBtn.disabled=active||connecting;stopBtn.disabled=!active;muteBtn.disabled=!active;muteBtn.textContent=muted?'🎤 Activar micrófono':'🔇 Silenciar micrófono'}
 async function checkAdmin(){if(!sg){sgError('No hay conexión con Supabase.');return}const {data:{user},error:userError}=await sg.auth.getUser();if(userError){sgError(userError.message);return}let admin=false;if(user){const {data,error}=await sg.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();if(error)throw error;admin=!!data}loginPanel.hidden=admin;voicePanel.hidden=!admin;if(admin){document.getElementById('account').textContent=user.email;sgError('')}else if(user){sgError('Esta cuenta no tiene permisos de administrador.');document.getElementById('loginForm').hidden=true}}
 document.getElementById('loginForm').addEventListener('submit',async e=>{e.preventDefault();const {error}=await sg.auth.signInWithPassword({email:document.getElementById('email').value,password:document.getElementById('password').value});if(error)sgError(error.message);else await checkAdmin()});
 document.getElementById('logout').addEventListener('click',async()=>{stop();await sg.auth.signOut();location.reload()});
-function stop(){supervisorSpeaking=false;pendingAttention=false;toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=false;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
+function stop(){supervisorSpeaking=false;pendingAttention=false;toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=true;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
 startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=true;controls(false);status('Conectando…');sgError('');try{
    await loadMemories();
    try{await loadParticipantDossiers()}catch(err){console.warn('Supervisor: expedientes no disponibles:',err);sgError('Aviso: los expedientes no se pudieron cargar. La voz puede funcionar sin ellos. '+err.message)}
@@ -350,7 +360,7 @@ startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=
   const sdp=await fetch('https://api.openai.com/v1/realtime/calls',{method:'POST',headers:{'Authorization':`Bearer ${ephemeral}`,'Content-Type':'application/sdp'},body:offer.sdp});if(!sdp.ok)throw Error('Error al establecer audio con OpenAI: '+(await sdp.text()).slice(0,250));
   await pc.setRemoteDescription({type:'answer',sdp:await sdp.text()});connecting=false;controls(true);status('🎙️ Conversación activa');
 }catch(err){stop();sgError('No se pudo iniciar la voz: '+err.message)}});
-reloadGuestMemoriesBtn.addEventListener('click',async()=>{reloadGuestMemoriesBtn.disabled=true;try{await loadMemories();if(chatConnected())sendMemoryContext();status('🧠 Memoria permanente actualizada: '+loadedMemories.length+' recuerdos');}catch(err){sgError('No se pudieron actualizar recuerdos: '+err.message)}finally{reloadGuestMemoriesBtn.disabled=false}});
-interruptBtn.addEventListener('click',()=>{if(!chatConnected())return; if(supervisorSpeaking){sendVoiceEvent({type:'response.cancel'}); if(audioEl&&audioEl.srcObject){try{sendVoiceEvent({type:'output_audio_buffer.clear'})}catch{}} supervisorSpeaking=false;} syncMicDuringSpeech(); status('✋ Interrupción solicitada · te escucho');});
+reloadGuestMemoriesBtn?.addEventListener('click',async()=>{reloadGuestMemoriesBtn.disabled=true;try{await loadMemories();if(chatConnected())sendMemoryContext();status('🧠 Memoria permanente actualizada: '+loadedMemories.length+' recuerdos');}catch(err){sgError('No se pudieron actualizar recuerdos: '+err.message)}finally{reloadGuestMemoriesBtn.disabled=false}});
+interruptBtn?.addEventListener('click',()=>{if(!chatConnected())return; if(supervisorSpeaking){sendVoiceEvent({type:'response.cancel'}); if(audioEl&&audioEl.srcObject){try{sendVoiceEvent({type:'output_audio_buffer.clear'})}catch{}} supervisorSpeaking=false;} syncMicDuringSpeech(); status('✋ Interrupción solicitada · te escucho');});
 muteBtn.addEventListener('click',()=>{if(!micStream)return;muted=!muted;syncMicDuringSpeech();controls(true);status(muted?'Micrófono silenciado':'🎙️ Conversación activa')});stopBtn.addEventListener('click',stop);
 chatControls();window.addEventListener('pagehide',stop);checkAdmin().then(async()=>{if(!voicePanel.hidden)await loadMemories();}).catch(e=>{memoryStatus.textContent=e.message;sgError(e.message)});
