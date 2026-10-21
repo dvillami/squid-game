@@ -280,10 +280,32 @@ async function executeEliminationTool(call){
 function handleVoiceEvent(event){
  let message;
  try{message=JSON.parse(event.data)}catch{return;}
- if(message.type==='response.created'){interruptionRequested=false;supervisorSpeaking=true;playbackActive=true;syncMicDuringSpeech();}
+ // Realtime WebRTC sends audio playback start/stop events separately from response.done.
+ // Keep the microphone off for the actual audio playback, not only generation.
+ if(message.type==='response.created'){
+   interruptionRequested=false;
+   supervisorSpeaking=true;
+   playbackActive=true;
+   syncMicDuringSpeech();
+ }
+ if(message.type==='output_audio_buffer.started'){
+   playbackActive=true;
+   syncMicDuringSpeech();
+ }
+ if(message.type==='output_audio_buffer.stopped'){
+   playbackActive=false;
+   supervisorSpeaking=false;
+   syncMicDuringSpeech();
+ }
  if(message.type==='response.done'){
-   supervisorSpeaking=false;syncMicDuringSpeech();
-   if(pendingAttention){pendingAttention=false;status('🎙️ Conversación activa · escuchando');}
+   supervisorSpeaking=false;
+   // response.done can precede the end of playback. Release on stopped.
+   // For text-only/error responses, no playback event may arrive.
+   if(message.response?.status==='failed' || message.response?.status==='cancelled'){
+     playbackActive=false;
+   }
+   syncMicDuringSpeech();
+   if(pendingAttention){pendingAttention=false;status('🎙️ Conversación activa');}
  }
  if(message.type==='input_audio_buffer.speech_started' && supervisorSpeaking){
    // Informative only. Do not cancel the active response.
