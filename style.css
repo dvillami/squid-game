@@ -117,3 +117,23 @@ body.board-page{background:radial-gradient(ellipse at 95% 10%,#57271e 0%,transpa
 @keyframes notice-countdown{from{transform:scaleX(1)}to{transform:scaleX(0)}}
 @media(max-width:480px){.notice-body{padding:14px;gap:12px}.notice-photo{width:84px;height:105px;flex-basis:84px}.notice-out{font-size:20px}.notice-head{font-size:10px}}
 @media(prefers-reduced-motion:reduce){.elimination-notice{transition:none}.notice-progress{animation:none!important}}
+
+/* MAYRA v4 — 18 tarjetas verticales en dos filas de nueve (pantallas grandes). */
+@media (min-width:1000px){
+  .board-page .wrap{max-width:1600px;}
+  .board-page .players{grid-template-columns:repeat(9,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:7px;}
+  .board-page .player,.board-page .player:nth-child(7),.board-page .player:nth-child(12){grid-column:auto;min-width:0;}
+  .board-page .photo{flex:1 1 auto;min-height:0;height:auto;aspect-ratio:auto;}
+  .board-page .photo img{object-fit:cover;object-position:center 22%;}
+}
+@media (min-width:700px) and (max-width:999px){
+  body.board-page{height:auto;min-height:100dvh;overflow:auto;}
+  .board-page .players{grid-template-columns:repeat(6,minmax(0,1fr));grid-template-rows:auto;gap:8px;}
+  .board-page .player,.board-page .player:nth-child(7),.board-page .player:nth-child(12){grid-column:auto;}
+  .board-page .photo{height:auto;aspect-ratio:3/4;flex:none;}
+  .board-page .photo img{object-fit:cover;object-position:center 22%;}
+}
+@media (max-width:699px){
+  .board-page .photo{aspect-ratio:3/4;}
+  .board-page .photo img{object-fit:cover;object-position:center 22%;}
+}
