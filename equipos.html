@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#100e17">
+<title>Squid Game | Sorteo de equipos</title>
+<link rel="stylesheet" href="style.css?v=mayra6">
+<link rel="stylesheet" href="equipos.css?v=1">
+</head>
+<body class="teams-page">
+<header class="top"><div class="brand"><span class="shapes">○ △ □</span><span>SQUID <b>GAME</b></span></div>
+<nav><a href="index.html">Tablero</a><a href="equipos.html" aria-current="page">Equipos</a><a href="admin.html">Administrar ↗</a></nav></header>
+<main class="teams-wrap">
+<section class="teams-hero">
+<div class="eyebrow">○ △ □ · EL SUPERVISOR PRESENTA</div>
+<h1>EL SORTEO <em>DE EQUIPOS</em></h1>
+<p>Un juego. Nuevas alianzas. Que decida la máquina.</p>
+</section>
+<section class="team-controls" aria-label="Opciones del sorteo">
+<label for="team-count">Número de equipos
+<select id="team-count"><option value="2">2 equipos</option><option value="3">3 equipos</option><option value="4">4 equipos</option><option value="5">5 equipos</option><option value="6">6 equipos</option></select>
+</label>
+<button id="start" type="button" disabled>◈ INICIAR SORTEO</button>
+<button id="skip" class="outline" type="button" disabled>Mostrar todos</button>
+<div class="team-meta"><span id="pool-count">Cargando participantes…</span><span id="draw-count">0 / 0 asignados</span></div>
+</section>
+<section class="machine" id="machine" aria-live="polite">
+<div class="machine-icon" id="machine-icon" aria-hidden="true">◇</div>
+<div><strong id="machine-title">ESPERANDO JUGADORES</strong><p id="machine-subtitle">Los equipos se formarán al azar.</p></div>
+<div class="progress-track"><div id="progress-fill"></div></div>
+</section>
+<div id="message" class="message" role="status"></div>
+<section id="team-grid" class="team-grid" aria-label="Equipos del sorteo"></section>
+<footer>○ △ □ &nbsp; SQUID GAME · CUMPLE DE MAYRA &nbsp; 🎃</footer>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="config.js"></script><script src="shared.js"></script><script src="equipos.js?v=1"></script>
+</body></html>
