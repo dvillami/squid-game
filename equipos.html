@@ -5,12 +5,14 @@
 <meta name="theme-color" content="#100e17">
 <title>Squid Game | Sorteo de equipos</title>
 <link rel="stylesheet" href="style.css?v=mayra6">
-<link rel="stylesheet" href="equipos.css?v=3">
+<link rel="stylesheet" href="equipos.css?v=4">
 </head>
-<body class="teams-page">
+<body class="teams-page teams-locked">
 <header class="top"><div class="brand"><span class="shapes">○ △ □</span><span>SQUID <b>GAME</b></span></div>
 <nav><a href="index.html">Tablero</a><a href="equipos.html" aria-current="page">Equipos</a><a href="admin.html">Administrar ↗</a></nav></header>
 <main class="teams-wrap">
+<section class="team-gate" id="team-gate" aria-label="Acceso restringido"><div class="gate-card"><div class="code-symbol">○ △ □</div><h1>ACCESO RESTRINGIDO</h1><p>Solo el administrador puede crear equipos y realizar eliminaciones.</p><div id="gate-message" role="status">Verificando tu sesión…</div><form id="gate-login" hidden><label>Correo administrador<input id="gate-email" type="email" autocomplete="username" required></label><label>Contraseña<input id="gate-password" type="password" autocomplete="current-password" required></label><button type="submit">ENTRAR</button></form><p><a href="admin.html">Volver a Administración</a></p></div></section>
+<div id="team-private" hidden>
 <section class="teams-hero">
 <div class="eyebrow">○ △ □ · EL SUPERVISOR PRESENTA</div>
 <h1>EL SORTEO <em>DE EQUIPOS</em></h1>
@@ -34,8 +36,8 @@
 <section id="team-grid" class="team-grid" aria-label="Equipos del sorteo"></section>
 <dialog id="code-dialog" class="code-dialog" aria-labelledby="code-title"><form id="code-form"><div class="code-symbol">○ △ □</div><h2 id="code-title">AUTORIZACIÓN DEL SUPERVISOR</h2><p id="code-team">Equipo seleccionado</p><label for="secret-code">Código de eliminación<input id="secret-code" type="password" inputmode="text" maxlength="5" pattern="[A-Za-z][0-9]{4}" autocomplete="off" spellcheck="false" placeholder="Letra + 4 dígitos" required></label><p class="code-hint">Usa el mismo código que empleas con EL SUPERVISOR. La validación se hará en Supabase.</p><p id="code-error" class="code-error" role="alert" hidden></p><div class="code-actions"><button id="code-cancel" type="button" class="outline">Cancelar</button><button id="code-confirm" type="submit">Autorizar sorteo</button></div></form></dialog>
 <aside id="team-elimination-notice" class="elimination-notice" hidden role="status" aria-live="assertive"><div class="notice-head">△ &nbsp; ATENCIÓN · SQUID GAME &nbsp; ○</div><div class="notice-body"><div class="notice-photo" id="winner-photo"></div><div class="notice-copy"><div class="notice-number" id="winner-number"></div><strong class="notice-name" id="winner-name"></strong><div class="notice-out">ELIMINADO</div><p id="winner-text">El juego continúa…</p></div></div><div class="notice-progress"></div></aside>
-<footer>○ △ □ &nbsp; SQUID GAME · CUMPLE DE MAYRA &nbsp; 🎃</footer>
+<footer>○ △ □ &nbsp; SQUID GAME · CUMPLE DE MAYRA &nbsp; 🎃</footer></div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="config.js"></script><script src="shared.js"></script><script src="equipos.js?v=3"></script>
+<script src="config.js"></script><script src="shared.js"></script><script src="equipos.js?v=4"></script>
 </body></html>

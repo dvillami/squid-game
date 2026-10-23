@@ -157,3 +157,14 @@ body.board-page{background:radial-gradient(ellipse at 95% 10%,#57271e 0%,transpa
   filter: grayscale(1) brightness(.58);
 }
 .board-page .player.eliminated .photo::before { content: none; }
+
+/* MAYRA v7: QR 50% mas grande que el anterior, en cada pantalla. */
+@media (min-width:700px){
+ .board-page .qr-invite{width:81px;padding:3px;}
+ .board-page .qr-invite img{width:72px;height:72px;}
+}
+@media (max-width:699px){
+ .board-page .qr-invite{width:120px;padding:4px;}
+ .board-page .qr-invite img{width:98px;height:98px;}
+}
+.board-page .metrics{grid-template-columns:repeat(3,minmax(0,1fr));}

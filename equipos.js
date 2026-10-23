@@ -65,7 +65,7 @@ function updateProgress(){
 }
 function finish(){
  running=false;clearTimeout(timer);timer=null;
- startBtn.disabled=!pool.length;countSelect.disabled=false;skipBtn.disabled=true;
+ startBtn.disabled=!adminAuthorized||!pool.length;countSelect.disabled=false;skipBtn.disabled=true;
  setMachine('SORTEO FINALIZADO',`${sequence.length} participantes distribuidos. ¡Que comience el juego!`);
  updatePickButtons();
 }
@@ -79,7 +79,7 @@ function next(){
  else timer=setTimeout(next,1300);
 }
 function start(){
- if(running||!pool.length)return;
+ if(!adminAuthorized||running||!pool.length)return;
  const n=Number(countSelect.value);
  if(!Number.isInteger(n)||n<2||n>6)return;
  if(pool.length<n){sgError('No hay suficientes participantes activos para ese número de equipos.');return}
@@ -112,25 +112,42 @@ async function loadPlayers(){
  // Misma selección de 18 plazas que el tablero. Los eliminados no participan.
  pool=(data||[]).filter(p=>Number(p.id)<=18&&!p.eliminated);
  $('pool-count').textContent=`${pool.length} participantes en juego`;
- startBtn.disabled=pool.length<Number(countSelect.value);updatePickButtons();
+ startBtn.disabled=!adminAuthorized||pool.length<Number(countSelect.value);updatePickButtons();
  if(pool.length<2)setMachine('SIN PARTICIPANTES','Se necesitan al menos dos jugadores activos.');
  else setMachine('MÁQUINA LISTA','Pulsa INICIAR SORTEO para formar los equipos.');
 }
 buildTeams(2);
-loadPlayers();
 
 
-// El sorteo de equipos es público. Solo una sesión administradora puede eliminar.
+// Verificar sesion y rol ANTES de cargar participantes o permitir sorteos.
 async function checkTeamAdmin(){
- if(!sg)return;
- const {data:{user},error:userError}=await sg.auth.getUser();
  adminAuthorized=false;
- if(user&&!userError){const {data,error}=await sg.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();adminAuthorized=!error&&!!data}
- $('admin-state').textContent=adminAuthorized?'🔒 Administrador autorizado: eliminaciones habilitadas':'🔒 Solo el administrador puede eliminar jugadores';
- $('login-toggle').hidden=adminAuthorized;
- $('team-login').hidden=true;
- updatePickButtons();
+ $('team-private').hidden=true;$('team-gate').hidden=false;
+ $('gate-message').textContent='Verificando tu sesión…';
+ if(!sgConfigured||!sg){$('gate-message').textContent='No hay conexión con Supabase.';$('gate-login').hidden=true;return}
+ try{
+  const {data:{user},error:userError}=await sg.auth.getUser();
+  if(userError)throw userError;
+  if(user){const {data,error}=await sg.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();if(error)throw error;adminAuthorized=!!data}
+  if(adminAuthorized){
+   $('team-gate').hidden=true;$('team-private').hidden=false;
+   $('admin-state').textContent='🔒 Administrador autorizado';
+   $('login-toggle').hidden=true;$('team-login').hidden=true;
+   await loadPlayers();updatePickButtons();return;
+  }
+  $('gate-message').textContent=user?'Esta cuenta no tiene permisos de administrador.':'Inicia sesión como administrador para continuar.';
+  $('gate-login').hidden=false;startBtn.disabled=true;
+ }catch(error){$('gate-message').textContent='No se pudo verificar el acceso: '+(error.message||String(error));$('gate-login').hidden=false;startBtn.disabled=true}
 }
+$('gate-login').addEventListener('submit',async e=>{
+ e.preventDefault();if(!sg)return;
+ $('gate-message').textContent='Verificando credenciales…';
+ const {error}=await sg.auth.signInWithPassword({email:$('gate-email').value,password:$('gate-password').value});
+ $('gate-password').value='';
+ if(error){$('gate-message').textContent='No se pudo iniciar sesión: '+error.message;return}
+ await checkTeamAdmin();
+});
+// Se conserva el control de permisos de eliminacion del codigo original.
 $('login-toggle').addEventListener('click',()=>{$('team-login').hidden=!$('team-login').hidden});
 $('team-login').addEventListener('submit',async e=>{
  e.preventDefault();if(!sg)return;
