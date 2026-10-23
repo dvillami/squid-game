@@ -137,3 +137,23 @@ body.board-page{background:radial-gradient(ellipse at 95% 10%,#57271e 0%,transpa
   .board-page .photo{aspect-ratio:3/4;}
   .board-page .photo img{object-fit:cover;object-position:center 22%;}
 }
+
+/* MAYRA: tinte verde cinematografico para participantes activos.
+   Al eliminarse, prevalece el blanco y negro y la X roja existentes. */
+.board-page .player:not(.eliminated) .photo img {
+  filter: sepia(.20) saturate(.78) hue-rotate(65deg) brightness(.94) contrast(1.06);
+  transition: filter .5s ease;
+}
+.board-page .player:not(.eliminated) .photo::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(22, 99, 68, .16);
+  mix-blend-mode: color;
+  pointer-events: none;
+  z-index: 1;
+}
+.board-page .player.eliminated .photo img {
+  filter: grayscale(1) brightness(.58);
+}
+.board-page .player.eliminated .photo::before { content: none; }
