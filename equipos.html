@@ -5,7 +5,7 @@
 <meta name="theme-color" content="#100e17">
 <title>Squid Game | Sorteo de equipos</title>
 <link rel="stylesheet" href="style.css?v=mayra6">
-<link rel="stylesheet" href="equipos.css?v=1">
+<link rel="stylesheet" href="equipos.css?v=3">
 </head>
 <body class="teams-page">
 <header class="top"><div class="brand"><span class="shapes">○ △ □</span><span>SQUID <b>GAME</b></span></div>
@@ -30,9 +30,12 @@
 <div class="progress-track"><div id="progress-fill"></div></div>
 </section>
 <div id="message" class="message" role="status"></div>
+<section class="admin-access" id="admin-access"><span id="admin-state">Verificando permisos de eliminación…</span><button id="login-toggle" type="button" class="outline" hidden>Acceso administrador</button><form id="team-login" hidden><label>Correo administrador<input id="team-email" type="email" autocomplete="username" required></label><label>Contraseña<input id="team-password" type="password" autocomplete="current-password" required></label><button type="submit">Iniciar sesión</button></form></section>
 <section id="team-grid" class="team-grid" aria-label="Equipos del sorteo"></section>
+<dialog id="code-dialog" class="code-dialog" aria-labelledby="code-title"><form id="code-form"><div class="code-symbol">○ △ □</div><h2 id="code-title">AUTORIZACIÓN DEL SUPERVISOR</h2><p id="code-team">Equipo seleccionado</p><label for="secret-code">Código de eliminación<input id="secret-code" type="password" inputmode="text" maxlength="5" pattern="[A-Za-z][0-9]{4}" autocomplete="off" spellcheck="false" placeholder="Letra + 4 dígitos" required></label><p class="code-hint">Usa el mismo código que empleas con EL SUPERVISOR. La validación se hará en Supabase.</p><p id="code-error" class="code-error" role="alert" hidden></p><div class="code-actions"><button id="code-cancel" type="button" class="outline">Cancelar</button><button id="code-confirm" type="submit">Autorizar sorteo</button></div></form></dialog>
+<aside id="team-elimination-notice" class="elimination-notice" hidden role="status" aria-live="assertive"><div class="notice-head">△ &nbsp; ATENCIÓN · SQUID GAME &nbsp; ○</div><div class="notice-body"><div class="notice-photo" id="winner-photo"></div><div class="notice-copy"><div class="notice-number" id="winner-number"></div><strong class="notice-name" id="winner-name"></strong><div class="notice-out">ELIMINADO</div><p id="winner-text">El juego continúa…</p></div></div><div class="notice-progress"></div></aside>
 <footer>○ △ □ &nbsp; SQUID GAME · CUMPLE DE MAYRA &nbsp; 🎃</footer>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="config.js"></script><script src="shared.js"></script><script src="equipos.js?v=1"></script>
+<script src="config.js"></script><script src="shared.js"></script><script src="equipos.js?v=3"></script>
 </body></html>

@@ -34,3 +34,33 @@ body.teams-page{background:radial-gradient(ellipse at 90% 5%,#412135 0%,transpar
 @media(max-width:700px){.team-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.teams-wrap{padding:12px}.team-members{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;padding:6px}.team-controls{padding:10px}.team-meta{min-width:100%}}
 @media(max-width:430px){.team-grid{grid-template-columns:1fr}.team-members{grid-template-columns:repeat(3,minmax(0,1fr))}.teams-hero h1{font-size:30px}}
 @media(prefers-reduced-motion:reduce){.machine.running .machine-icon,.team-member{animation:none}}
+
+/* Sorteo de eliminación individual dentro de cada equipo. */
+.team-head{flex-wrap:wrap}
+.team-pick{background:#ff347c;padding:7px 9px;font-size:11px;letter-spacing:.3px;white-space:nowrap}
+.team-pick:disabled{opacity:.5;cursor:not-allowed}
+.team-member.roulette-lit{outline:4px solid #d8ff72;outline-offset:-4px;box-shadow:0 0 22px 6px #c7ff60aa;transform:scale(1.035);position:relative;z-index:2}
+.team-member.roulette-selected{outline:4px solid #ff347c;outline-offset:-4px;box-shadow:0 0 30px #ff347cbb;position:relative;z-index:2}
+.team-member.roulette-eliminated .member-photo img{filter:grayscale(1) brightness(.57)}
+.team-member.roulette-eliminated .member-photo:after{content:'✕';position:absolute;inset:0;display:grid;place-items:center;color:#ff265e;font-size:clamp(40px,5vw,95px);font-weight:900;text-shadow:0 0 16px #200008;pointer-events:none}
+.admin-access{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;margin:8px 0 12px;font-size:12px;color:#b7b0c0}
+.admin-access form{display:flex;gap:8px;align-items:end;flex-wrap:wrap;background:#241c2b;padding:10px;border:1px solid #61445a;border-radius:8px}
+.admin-access form[hidden],.admin-access button[hidden]{display:none}
+.admin-access form label{min-width:150px}
+.teams-page .elimination-notice{z-index:9999}
+@media(prefers-reduced-motion:reduce){.team-member.roulette-lit{transform:none}}
+
+/* Autorización previa a la ruleta, sin alterar los demás componentes. */
+.code-dialog{width:min(430px,calc(100vw - 28px));max-width:none;background:linear-gradient(145deg,#271625,#12141b);border:2px solid #ff347c;border-radius:16px;color:#fff;box-shadow:0 20px 80px #000c;padding:23px}
+.code-dialog::backdrop{background:#050609dc;backdrop-filter:blur(5px)}
+.code-dialog form{display:flex;flex-direction:column;gap:12px}
+.code-symbol{text-align:center;color:#ff347c;font-size:24px;letter-spacing:10px}
+.code-dialog h2{text-align:center;font-size:20px;margin:0;letter-spacing:1px}
+.code-dialog p{text-align:center;margin:0;color:#c7b9c6;font-size:13px}
+.code-dialog label{font-weight:700;color:#f4dfe9}
+.code-dialog input{font-size:19px;text-align:center;letter-spacing:4px}
+.code-dialog .code-hint{font-size:11px;line-height:1.5}
+.code-dialog .code-error{color:#ff8baa;font-weight:700}
+.code-dialog .code-error[hidden]{display:none}
+.code-actions{display:flex;gap:10px}
+.code-actions button{flex:1}
