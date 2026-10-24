@@ -22,23 +22,7 @@ let pendingAttention=false;
 let interruptionRequested=false;
 let speakingGuardUntil=0;
 let playbackActive=false;
-let wakeGateBusy=false;
-let conversationAwake=false;
-let conversationIdleTimer=null;
-const CONVERSATION_IDLE_MS=60000;
-function clearConversationIdle(){clearTimeout(conversationIdleTimer);conversationIdleTimer=null;}
-function armConversationIdle(){
- clearConversationIdle();
- if(!conversationAwake||supervisorSpeaking||playbackActive)return;
- conversationIdleTimer=setTimeout(()=>{
-  conversationAwake=false;wakeGateBusy=false;
-  status('🔇 En descanso · di «Supervisor» para hablar');
- },CONVERSATION_IDLE_MS);
-}
 
-const WAKE_WORD=/\bsupervisor\b/i;
-let wakeTranscriptBuffer='';
-let wakeTranscriptTimer=null;
 function clearWakeTranscript(){clearTimeout(wakeTranscriptTimer);wakeTranscriptTimer=null;wakeTranscriptBuffer='';}
 
 
@@ -271,7 +255,7 @@ PERSONALIDAD: eres un anfitrión teatralmente elegante, astuto, mordaz y entrete
 HUMOR: bromea con las decisiones, la suerte, las estrategias fallidas, las negociaciones imposibles, las reglas y los resultados. Puedes lanzar pullas elegantes como «Una estrategia fascinante. Lástima que no funcionó» o «Admiro su confianza. Los resultados parecen menos convencidos». No repitas esas frases como plantillas; improvisa según el momento y el expediente pertinente. Si un participante presume, desafíalo con ingenio; si pierde, puedes comentar la derrota con humor sin ridiculizar a la persona. Si alguien está incómodo o molesto, baja la intensidad.
 LÍMITES: jamás insultes, humilles o desprecies a los invitados. No hagas bromas sobre apariencia, edad, salud, dificultades personales, inseguridades, religión o datos privados delicados. Trata a los invitados mayores con cortesía sin infantilizarlos. Los expedientes son contexto para conocer a las personas, no una autorización para divulgar secretos. No inventes detalles.
 ESTILO: normalmente responde en dos a cuatro frases ágiles, con ritmo y personalidad. Varía el tono: serio cuando expliques reglas o anuncies decisiones; irónico cuando surja una ocasión graciosa; intrigante al crear expectativa. Evita discursos interminables, frases grandilocuentes, metáforas repetitivas, risas teatrales, muletillas de villano y acotaciones habladas como «pausa» o «risita». No expliques el chiste.
-JUEGOS: dispones de un catálogo de juegos obtenido de Supabase al iniciar la sesión. Úsalo para explicar reglas, objetivos, premios y orden. Distingue juegos provisionales de confirmados. No inventes información que falte.\nCONDUCTA: habla solo cuando alguien se dirija a ti o el organizador te solicite una intervención. No interrumpas ni anuncies espontáneamente notas, recuerdos o expedientes. Mantén el misterio de tu identidad. En bienvenidas, transiciones, reglas y finales puedes extenderte moderadamente si te lo piden.
+JUEGOS: dispones de un catálogo de juegos obtenido de Supabase al iniciar la sesión. Úsalo para explicar reglas, objetivos, premios y orden. Distingue juegos provisionales de confirmados. No inventes información que falte.\nCONDUCTA: mientras la conversación de voz esté activa, responde normalmente a lo que te digan sin exigir la palabra Supervisor. No anuncies espontáneamente notas, recuerdos o expedientes. Mantén el misterio de tu identidad. En bienvenidas, transiciones, reglas y finales puedes extenderte moderadamente si te lo piden.
 HERRAMIENTAS: solo usa eliminar_jugador ante una orden explícita del organizador con número y código completos; no adivines, no pidas confirmación si ambos están claros, y nunca anuncies éxito antes de la respuesta real de Supabase. Si falla, di claramente que no se eliminó. No reveles cómo se validan los códigos. ROMPE EL CÓDIGO aún no está implementado. Solo usa guardar_recuerdo si el organizador pide expresamente guardar un hecho confirmado; no guardes automáticamente rumores ni comentarios de invitados. No reveles detalles técnicos internos.`;
 // Conversational policy complements the server-side no-barge-in setting.
 const interruptionPolicy=`REGLAS DE INTERRUPCIONES Y RUIDO: Mientras estés hablando, ignora murmullos, comentarios entre invitados y ruidos breves. Termina tu idea antes de responder a otra intervención. Cuando alguien te llame claramente «Supervisor» o «Un momento, Supervisor», atiéndelo con una frase irónica breve y amable, por ejemplo «Espero que sea importante lo que tiene que decir para interrumpirme». No repitas siempre la misma frase. Si los invitados están hablando demasiado y te piden recuperar el orden, reclama silencio con sarcasmo divertido, sin insultar. No finjas que puedes contar cuántas personas están hablando ni afirmar que escuchaste palabras que no entendiste. Después de una interrupción, retoma el tema si sigue siendo pertinente. Nunca ignores una instrucción clara del organizador para detener la conversación.`;
@@ -363,34 +347,10 @@ async function executeVideoTool(call){
  sendVoiceEvent({type:'conversation.item.create',item:{type:'function_call_output',call_id:call.call_id,output:JSON.stringify(result)}});
  sendVoiceEvent({type:'response.create'});
 }
-function processWakeTranscript(raw){
- const transcript=String(raw||'').trim();
- if(!transcript)return;
- // La transcripción puede dividir una frase por pausas cortas.
- // Acumulamos fragmentos antes de decidir si el organizador nos llamó.
- if(!conversationAwake){
-  wakeTranscriptBuffer=(wakeTranscriptBuffer+' '+transcript).trim().slice(-800);
-  if(!WAKE_WORD.test(wakeTranscriptBuffer)){
-   status('🔇 Escuchando llamada · di «Supervisor» para hablar');
-   clearTimeout(wakeTranscriptTimer);
-   wakeTranscriptTimer=setTimeout(()=>{wakeTranscriptBuffer='';wakeTranscriptTimer=null;},5000);
-   return;
-  }
-  clearWakeTranscript();
-  conversationAwake=true;
- }
- clearConversationIdle();
- if(wakeGateBusy||supervisorSpeaking||playbackActive)return;
- wakeGateBusy=true;
- status('🎙️ Conversación activa · 60 s para continuar');
- sendVoiceEvent({type:'response.create'});
-}
 function handleVoiceEvent(event){
  let message;
  try{message=JSON.parse(event.data)}catch{return;}
- if(message.type==='conversation.item.input_audio_transcription.completed'){
-   processWakeTranscript(message.transcript);
- }
+ // El VAD del servidor crea respuestas automáticamente mientras la sesión está activa.
  // Realtime WebRTC sends audio playback start/stop events separately from response.done.
  // Keep the microphone off for the actual audio playback, not only generation.
  if(message.type==='response.created'){
@@ -407,10 +367,9 @@ function handleVoiceEvent(event){
    playbackActive=false;
    supervisorSpeaking=false;
    syncMicDuringSpeech();
-   armConversationIdle();
+
  }
  if(message.type==='response.done'){
-   wakeGateBusy=false;
    supervisorSpeaking=false;
    // response.done can precede the end of playback. Release on stopped.
    // For text-only/error responses, no playback event may arrive.
@@ -418,10 +377,10 @@ function handleVoiceEvent(event){
      playbackActive=false;
    }
    syncMicDuringSpeech();
-   armConversationIdle();
+
    if(pendingAttention){pendingAttention=false;status('🎙️ Conversación activa');}
  }
- if(message.type==='input_audio_buffer.speech_started' && conversationAwake){clearConversationIdle();status('🎙️ Te escucho…');}
+ if(message.type==='input_audio_buffer.speech_started'){status('🎙️ Te escucho…');}
  if(message.type==='input_audio_buffer.speech_started' && supervisorSpeaking){
    // Informative only. Do not cancel the active response.
    pendingAttention=true;
@@ -467,7 +426,7 @@ function handleVoiceEvent(event){
 function configureVoiceTools(){
  // Apply the updated character personality for this voice session.
  sendVoiceEvent({type:'session.update',session:{type: 'realtime',instructions:fullSupervisorInstructions(),
-   audio:{input:{transcription:{model:'gpt-4o-mini-transcribe',language:'es'},turn_detection:{type:'server_vad',threshold:0.75,prefix_padding_ms:350,silence_duration_ms:1800,create_response:false,interrupt_response:false}}},
+   audio:{input:{transcription:{model:'gpt-4o-mini-transcribe',language:'es'},turn_detection:{type:'server_vad',threshold:0.75,prefix_padding_ms:350,silence_duration_ms:1800,create_response:true,interrupt_response:false}}},
   tools:[{type:'function',name:ELIMINATION_TOOL,description:'Cuando el organizador ordene eliminar a un jugador y diga un código de una letra y cuatro dígitos, LLAMA a esta función. No vuelvas a pedir confirmación si ya tienes ambos datos. La función consulta Supabase y devuelve el resultado real.',parameters:{type:'object',properties:{jugador:{type:'integer',description:'ID numérico del jugador.'},codigo:{type:'string',description:'Código de una letra seguida de cuatro dígitos, por ejemplo T2233.'}},required:['jugador','codigo'],additionalProperties:false}},{type:'function',name:VIDEO_TOOL,description:'Controla videos de YouTube en la pantalla de proyección. Úsala SOLO cuando el organizador se dirija a ti como Supervisor y te pida explícitamente reproducir, pausar o detener un video. Para reproducir, pasa todas las pistas que dio el organizador en nombre: título aproximado, descripción, juego, canción o contexto. No inventes nombres; la herramienta buscará en el catálogo de Supabase y ofrecerá opciones si hay ambigüedad. No afirmes éxito antes de recibir el resultado.',parameters:{type:'object',properties:{accion:{type:'string',enum:['play','pause','stop']},nombre:{type:'string',description:'Nombre del video o del juego cuando la acción sea play'}},required:['accion'],additionalProperties:false}},{type:'function',name:MEMORY_TOOL,description:'Guarda un recuerdo permanente SOLO cuando el organizador lo pide explícitamente, por ejemplo: Supervisor, recuerda que Carlos ganó el juego 2. No guardes rumores, conversaciones privadas, comentarios de invitados ni deducciones.',parameters:{type:'object',properties:{hecho:{type:'string',description:'Hecho breve confirmado por el organizador (máximo 2000 caracteres).'}},required:['hecho'],additionalProperties:false}}],
   tool_choice:'auto'
  }});
@@ -482,7 +441,7 @@ function controls(active){if(interruptBtn)interruptBtn.disabled=!active;startBtn
 async function checkAdmin(){if(!sg){sgError('No hay conexión con Supabase.');return}const {data:{user},error:userError}=await sg.auth.getUser();if(userError){sgError(userError.message);return}let admin=false;if(user){const {data,error}=await sg.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();if(error)throw error;admin=!!data}loginPanel.hidden=admin;voicePanel.hidden=!admin;if(admin){document.getElementById('account').textContent=user.email;sgError('')}else if(user){sgError('Esta cuenta no tiene permisos de administrador.');document.getElementById('loginForm').hidden=true}}
 document.getElementById('loginForm').addEventListener('submit',async e=>{e.preventDefault();const {error}=await sg.auth.signInWithPassword({email:document.getElementById('email').value,password:document.getElementById('password').value});if(error)sgError(error.message);else await checkAdmin()});
 document.getElementById('logout').addEventListener('click',async()=>{stop();await sg.auth.signOut();location.reload()});
-function stop(){clearWakeTranscript();clearConversationIdle();conversationAwake=false;wakeGateBusy=false;playbackActive=false;interruptionRequested=false;supervisorSpeaking=false;pendingAttention=false;toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();processedVideoCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=true;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
+function stop(){playbackActive=false;interruptionRequested=false;supervisorSpeaking=false;pendingAttention=false;toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();processedVideoCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=true;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
 startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=true;controls(false);status('Conectando…');sgError('');try{
    await loadMemories();
    try{await loadSupervisorGames()}catch(err){
@@ -504,7 +463,7 @@ startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=
   const channel=pc.createDataChannel('oai-events');supervisorChannel=channel;chatControls();channel.onclose=chatControls;channel.onmessage=handleVoiceEvent;channel.onopen=()=>{chatControls();console.info('Supervisor: canal abierto; esperando confirmación de sesión.');};
   const offer=await pc.createOffer();await pc.setLocalDescription(offer);
   const sdp=await fetch('https://api.openai.com/v1/realtime/calls',{method:'POST',headers:{'Authorization':`Bearer ${ephemeral}`,'Content-Type':'application/sdp'},body:offer.sdp});if(!sdp.ok)throw Error('Error al establecer audio con OpenAI: '+(await sdp.text()).slice(0,250));
-  await pc.setRemoteDescription({type:'answer',sdp:await sdp.text()});connecting=false;controls(true);status('🔇 En espera · di «Supervisor» para hablar');
+  await pc.setRemoteDescription({type:'answer',sdp:await sdp.text()});connecting=false;controls(true);status('🎙️ Conversación activa · micrófono abierto');
 }catch(err){stop();sgError('No se pudo iniciar la voz: '+err.message)}});
 reloadGuestMemoriesBtn?.addEventListener('click',async()=>{reloadGuestMemoriesBtn.disabled=true;try{await loadMemories();if(chatConnected())sendMemoryContext();status('🧠 Memoria permanente actualizada: '+loadedMemories.length+' recuerdos');}catch(err){sgError('No se pudieron actualizar recuerdos: '+err.message)}finally{reloadGuestMemoriesBtn.disabled=false}});
 interruptBtn?.addEventListener('click',()=>{
