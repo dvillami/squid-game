@@ -25,7 +25,7 @@ let playbackActive=false;
 let wakeGateBusy=false;
 let conversationAwake=false;
 let conversationIdleTimer=null;
-const CONVERSATION_IDLE_MS=10000;
+const CONVERSATION_IDLE_MS=60000;
 function clearConversationIdle(){clearTimeout(conversationIdleTimer);conversationIdleTimer=null;}
 function armConversationIdle(){
  clearConversationIdle();
@@ -371,7 +371,7 @@ function processWakeTranscript(raw){
  clearConversationIdle();
  if(wakeGateBusy||supervisorSpeaking||playbackActive)return;
  wakeGateBusy=true;
- status('🎙️ Conversación activa · 10 s para continuar');
+ status('🎙️ Conversación activa · 20 s para continuar');
  sendVoiceEvent({type:'response.create'});
 }
 function handleVoiceEvent(event){
