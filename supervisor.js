@@ -23,6 +23,19 @@ let interruptionRequested=false;
 let speakingGuardUntil=0;
 let playbackActive=false;
 let wakeGateBusy=false;
+let conversationAwake=false;
+let conversationIdleTimer=null;
+const CONVERSATION_IDLE_MS=10000;
+function clearConversationIdle(){clearTimeout(conversationIdleTimer);conversationIdleTimer=null;}
+function armConversationIdle(){
+ clearConversationIdle();
+ if(!conversationAwake||supervisorSpeaking||playbackActive)return;
+ conversationIdleTimer=setTimeout(()=>{
+  conversationAwake=false;wakeGateBusy=false;
+  status('🔇 En descanso · di «Supervisor» para hablar');
+ },CONVERSATION_IDLE_MS);
+}
+
 const WAKE_WORD=/\bsupervisor\b/i;
 
 
@@ -284,6 +297,39 @@ async function executeEliminationTool(call){
  }catch(err){sgError('No se pudo comunicar el resultado al Supervisor: '+err.message);}
 }
 // Solo una intervención que nombre al Supervisor puede activar una respuesta.
+// Búsqueda flexible por nombre, juego, categoría y descripción, sin exigir frase exacta.
+function normalizeVideoText(value){
+ return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
+  .replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
+}
+const VIDEO_STOPWORDS=new Set('el la los las de del un una unos unas para por con y o que quiero quieres quisiera pon poner reproduce reproducir video videos musica musical cancion canciones tema juego juegos instrucciones instruccion reglas explicacion explica sobre acerca dame muestra mostrar necesito ahora siguiente supervisor oye favor'.split(' '));
+function videoTerms(value){return normalizeVideoText(value).split(' ').filter(w=>w.length>1&&!VIDEO_STOPWORDS.has(w));}
+function rankVideos(videos,query){
+ const q=normalizeVideoText(query),terms=videoTerms(query);
+ const wantsMusic=/\b(musica|cancion|musical|ambiente|ambientacion|bailar)\b/.test(q);
+ const wantsRules=/\b(instrucciones|instruccion|reglas|explica|explicacion|tutorial)\b/.test(q);
+ return videos.map(video=>{
+  const name=normalizeVideoText(video.name),game=normalizeVideoText(video.game_name),desc=normalizeVideoText(video.description),cat=normalizeVideoText(video.category);
+  const all=[name,game,desc,cat].join(' ');
+  let score=0;
+  if(q===name||q===game)score+=110;
+  if(q.length>2&&(name.includes(q)||game.includes(q)))score+=85;
+  if(q.length>2&&desc.includes(q))score+=35;
+  if(terms.length){
+   const matches=terms.filter(t=>all.split(' ').some(word=>word===t||word.startsWith(t)&&t.length>=4));
+   if(matches.length===terms.length)score+=40;
+   score+=matches.reduce((sum,t)=>sum+(name.includes(t)?15:game.includes(t)?14:desc.includes(t)?6:3),0);
+   if(matches.length<Math.ceil(terms.length*.6))score=0;
+  }
+  if(wantsMusic&&['musica','ambiente'].includes(cat))score+=12;
+  if(wantsRules&&cat==='instrucciones')score+=12;
+  if(!terms.length&&score===0){
+   if(wantsMusic&&['musica','ambiente'].includes(cat))score+=20;
+   if(wantsRules&&cat==='instrucciones')score+=20;
+  }
+  return {video,score};
+ }).filter(x=>x.score>=12).sort((a,b)=>b.score-a.score||Number(a.video.id)-Number(b.video.id));
+}
 async function executeVideoTool(call){
  let result;
  try{
@@ -293,14 +339,19 @@ async function executeVideoTool(call){
   const {data:{user}}=await sg.auth.getUser();if(!user)throw Error('Inicia sesión como administrador');
   let id=null;
   if(action==='play'){
-   const {data,error}=await sg.from('game_videos').select('id,name,game_name,category,is_active').eq('is_active',true);
+   const {data,error}=await sg.from('game_videos').select('id,name,description,game_name,category,is_active').eq('is_active',true);
    if(error)throw error;
-   const query=String(args.nombre||'').trim().toLocaleLowerCase('es');
-   if(!query)throw Error('Indica el nombre del video o juego');
-   const candidates=(data||[]).filter(v=>[v.name,v.game_name].some(t=>String(t||'').toLocaleLowerCase('es').includes(query)));
-   if(candidates.length===0)throw Error('No encontré un video activo con ese nombre');
-   if(candidates.length>1)throw Error('Hay varios videos coincidentes: '+candidates.map(v=>v.name).join(', ')+'. Di un nombre más específico.');
-   id=candidates[0].id;
+   const query=String(args.nombre||'').trim();
+   if(!query)throw Error('Dime qué video quieres reproducir.');
+   const candidates=rankVideos(data||[],query);
+   if(!candidates.length){
+    const available=(data||[]).map(v=>v.name).slice(0,12).join(', ');
+    throw Error('No encontré un video que coincida con «'+query+'». Videos disponibles: '+(available||'ninguno')+'.');
+   }
+   if(candidates.length>1 && candidates[0].score-candidates[1].score<12){
+    throw Error('Encontré varias posibilidades: '+candidates.slice(0,4).map(x=>x.video.name).join(', ')+'. ¿Cuál quieres?');
+   }
+   id=candidates[0].video.id;
   }
   const {error}=await sg.rpc('control_video',{p_video_id:id,p_action:action});if(error)throw error;
   result={ok:true,mensaje:action==='play'?'Video enviado a la pantalla':action==='pause'?'Video pausado':'Video detenido'};
@@ -310,13 +361,17 @@ async function executeVideoTool(call){
 }
 function processWakeTranscript(raw){
  const transcript=String(raw||'').trim();
- if(!transcript||!WAKE_WORD.test(transcript)){
+ if(!transcript)return;
+ // Una invocación abre la conversación; las siguientes frases no necesitan la palabra clave.
+ if(!conversationAwake && !WAKE_WORD.test(transcript)){
   status('🔇 En espera · di «Supervisor» para hablar');
   return;
  }
+ conversationAwake=true;
+ clearConversationIdle();
  if(wakeGateBusy||supervisorSpeaking||playbackActive)return;
  wakeGateBusy=true;
- status('🎙️ Llamada detectada · respondiendo');
+ status('🎙️ Conversación activa · 10 s para continuar');
  sendVoiceEvent({type:'response.create'});
 }
 function handleVoiceEvent(event){
@@ -341,6 +396,7 @@ function handleVoiceEvent(event){
    playbackActive=false;
    supervisorSpeaking=false;
    syncMicDuringSpeech();
+   armConversationIdle();
  }
  if(message.type==='response.done'){
    wakeGateBusy=false;
@@ -351,8 +407,10 @@ function handleVoiceEvent(event){
      playbackActive=false;
    }
    syncMicDuringSpeech();
+   armConversationIdle();
    if(pendingAttention){pendingAttention=false;status('🎙️ Conversación activa');}
  }
+ if(message.type==='input_audio_buffer.speech_started' && conversationAwake){clearConversationIdle();}
  if(message.type==='input_audio_buffer.speech_started' && supervisorSpeaking){
    // Informative only. Do not cancel the active response.
    pendingAttention=true;
@@ -399,7 +457,7 @@ function configureVoiceTools(){
  // Apply the updated character personality for this voice session.
  sendVoiceEvent({type:'session.update',session:{type: 'realtime',instructions:fullSupervisorInstructions(),
    audio:{input:{transcription:{model:'gpt-4o-mini-transcribe',language:'es'},turn_detection:{type:'server_vad',threshold:0.75,prefix_padding_ms:350,silence_duration_ms:850,create_response:false,interrupt_response:false}}},
-  tools:[{type:'function',name:ELIMINATION_TOOL,description:'Cuando el organizador ordene eliminar a un jugador y diga un código de una letra y cuatro dígitos, LLAMA a esta función. No vuelvas a pedir confirmación si ya tienes ambos datos. La función consulta Supabase y devuelve el resultado real.',parameters:{type:'object',properties:{jugador:{type:'integer',description:'ID numérico del jugador.'},codigo:{type:'string',description:'Código de una letra seguida de cuatro dígitos, por ejemplo T2233.'}},required:['jugador','codigo'],additionalProperties:false}},{type:'function',name:VIDEO_TOOL,description:'Controla videos de YouTube en la pantalla de proyección. Úsala SOLO cuando el organizador se dirija a ti como Supervisor y te pida explícitamente reproducir, pausar o detener un video. Para reproducir, pasa el nombre exacto o parte inequívoca del nombre o del juego. No afirmes éxito antes de recibir el resultado.',parameters:{type:'object',properties:{accion:{type:'string',enum:['play','pause','stop']},nombre:{type:'string',description:'Nombre del video o del juego cuando la acción sea play'}},required:['accion'],additionalProperties:false}},{type:'function',name:MEMORY_TOOL,description:'Guarda un recuerdo permanente SOLO cuando el organizador lo pide explícitamente, por ejemplo: Supervisor, recuerda que Carlos ganó el juego 2. No guardes rumores, conversaciones privadas, comentarios de invitados ni deducciones.',parameters:{type:'object',properties:{hecho:{type:'string',description:'Hecho breve confirmado por el organizador (máximo 2000 caracteres).'}},required:['hecho'],additionalProperties:false}}],
+  tools:[{type:'function',name:ELIMINATION_TOOL,description:'Cuando el organizador ordene eliminar a un jugador y diga un código de una letra y cuatro dígitos, LLAMA a esta función. No vuelvas a pedir confirmación si ya tienes ambos datos. La función consulta Supabase y devuelve el resultado real.',parameters:{type:'object',properties:{jugador:{type:'integer',description:'ID numérico del jugador.'},codigo:{type:'string',description:'Código de una letra seguida de cuatro dígitos, por ejemplo T2233.'}},required:['jugador','codigo'],additionalProperties:false}},{type:'function',name:VIDEO_TOOL,description:'Controla videos de YouTube en la pantalla de proyección. Úsala SOLO cuando el organizador se dirija a ti como Supervisor y te pida explícitamente reproducir, pausar o detener un video. Para reproducir, pasa todas las pistas que dio el organizador en nombre: título aproximado, descripción, juego, canción o contexto. No inventes nombres; la herramienta buscará en el catálogo de Supabase y ofrecerá opciones si hay ambigüedad. No afirmes éxito antes de recibir el resultado.',parameters:{type:'object',properties:{accion:{type:'string',enum:['play','pause','stop']},nombre:{type:'string',description:'Nombre del video o del juego cuando la acción sea play'}},required:['accion'],additionalProperties:false}},{type:'function',name:MEMORY_TOOL,description:'Guarda un recuerdo permanente SOLO cuando el organizador lo pide explícitamente, por ejemplo: Supervisor, recuerda que Carlos ganó el juego 2. No guardes rumores, conversaciones privadas, comentarios de invitados ni deducciones.',parameters:{type:'object',properties:{hecho:{type:'string',description:'Hecho breve confirmado por el organizador (máximo 2000 caracteres).'}},required:['hecho'],additionalProperties:false}}],
   tool_choice:'auto'
  }});
 }
@@ -413,7 +471,7 @@ function controls(active){if(interruptBtn)interruptBtn.disabled=!active;startBtn
 async function checkAdmin(){if(!sg){sgError('No hay conexión con Supabase.');return}const {data:{user},error:userError}=await sg.auth.getUser();if(userError){sgError(userError.message);return}let admin=false;if(user){const {data,error}=await sg.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();if(error)throw error;admin=!!data}loginPanel.hidden=admin;voicePanel.hidden=!admin;if(admin){document.getElementById('account').textContent=user.email;sgError('')}else if(user){sgError('Esta cuenta no tiene permisos de administrador.');document.getElementById('loginForm').hidden=true}}
 document.getElementById('loginForm').addEventListener('submit',async e=>{e.preventDefault();const {error}=await sg.auth.signInWithPassword({email:document.getElementById('email').value,password:document.getElementById('password').value});if(error)sgError(error.message);else await checkAdmin()});
 document.getElementById('logout').addEventListener('click',async()=>{stop();await sg.auth.signOut();location.reload()});
-function stop(){wakeGateBusy=false;playbackActive=false;interruptionRequested=false;supervisorSpeaking=false;pendingAttention=false;toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();processedVideoCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=true;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
+function stop(){clearConversationIdle();conversationAwake=false;wakeGateBusy=false;playbackActive=false;interruptionRequested=false;supervisorSpeaking=false;pendingAttention=false;toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();processedVideoCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=true;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
 startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=true;controls(false);status('Conectando…');sgError('');try{
    await loadMemories();
    try{await loadSupervisorGames()}catch(err){
