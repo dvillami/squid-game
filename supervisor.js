@@ -37,6 +37,10 @@ function armConversationIdle(){
 }
 
 const WAKE_WORD=/\bsupervisor\b/i;
+let wakeTranscriptBuffer='';
+let wakeTranscriptTimer=null;
+function clearWakeTranscript(){clearTimeout(wakeTranscriptTimer);wakeTranscriptTimer=null;wakeTranscriptBuffer='';}
+
 
 
 
@@ -362,16 +366,23 @@ async function executeVideoTool(call){
 function processWakeTranscript(raw){
  const transcript=String(raw||'').trim();
  if(!transcript)return;
- // Una invocación abre la conversación; las siguientes frases no necesitan la palabra clave.
- if(!conversationAwake && !WAKE_WORD.test(transcript)){
-  status('🔇 En espera · di «Supervisor» para hablar');
-  return;
+ // La transcripción puede dividir una frase por pausas cortas.
+ // Acumulamos fragmentos antes de decidir si el organizador nos llamó.
+ if(!conversationAwake){
+  wakeTranscriptBuffer=(wakeTranscriptBuffer+' '+transcript).trim().slice(-800);
+  if(!WAKE_WORD.test(wakeTranscriptBuffer)){
+   status('🔇 Escuchando llamada · di «Supervisor» para hablar');
+   clearTimeout(wakeTranscriptTimer);
+   wakeTranscriptTimer=setTimeout(()=>{wakeTranscriptBuffer='';wakeTranscriptTimer=null;},5000);
+   return;
+  }
+  clearWakeTranscript();
+  conversationAwake=true;
  }
- conversationAwake=true;
  clearConversationIdle();
  if(wakeGateBusy||supervisorSpeaking||playbackActive)return;
  wakeGateBusy=true;
- status('🎙️ Conversación activa · 20 s para continuar');
+ status('🎙️ Conversación activa · 60 s para continuar');
  sendVoiceEvent({type:'response.create'});
 }
 function handleVoiceEvent(event){
@@ -410,7 +421,7 @@ function handleVoiceEvent(event){
    armConversationIdle();
    if(pendingAttention){pendingAttention=false;status('🎙️ Conversación activa');}
  }
- if(message.type==='input_audio_buffer.speech_started' && conversationAwake){clearConversationIdle();}
+ if(message.type==='input_audio_buffer.speech_started' && conversationAwake){clearConversationIdle();status('🎙️ Te escucho…');}
  if(message.type==='input_audio_buffer.speech_started' && supervisorSpeaking){
    // Informative only. Do not cancel the active response.
    pendingAttention=true;
@@ -456,7 +467,7 @@ function handleVoiceEvent(event){
 function configureVoiceTools(){
  // Apply the updated character personality for this voice session.
  sendVoiceEvent({type:'session.update',session:{type: 'realtime',instructions:fullSupervisorInstructions(),
-   audio:{input:{transcription:{model:'gpt-4o-mini-transcribe',language:'es'},turn_detection:{type:'server_vad',threshold:0.75,prefix_padding_ms:350,silence_duration_ms:850,create_response:false,interrupt_response:false}}},
+   audio:{input:{transcription:{model:'gpt-4o-mini-transcribe',language:'es'},turn_detection:{type:'server_vad',threshold:0.75,prefix_padding_ms:350,silence_duration_ms:1800,create_response:false,interrupt_response:false}}},
   tools:[{type:'function',name:ELIMINATION_TOOL,description:'Cuando el organizador ordene eliminar a un jugador y diga un código de una letra y cuatro dígitos, LLAMA a esta función. No vuelvas a pedir confirmación si ya tienes ambos datos. La función consulta Supabase y devuelve el resultado real.',parameters:{type:'object',properties:{jugador:{type:'integer',description:'ID numérico del jugador.'},codigo:{type:'string',description:'Código de una letra seguida de cuatro dígitos, por ejemplo T2233.'}},required:['jugador','codigo'],additionalProperties:false}},{type:'function',name:VIDEO_TOOL,description:'Controla videos de YouTube en la pantalla de proyección. Úsala SOLO cuando el organizador se dirija a ti como Supervisor y te pida explícitamente reproducir, pausar o detener un video. Para reproducir, pasa todas las pistas que dio el organizador en nombre: título aproximado, descripción, juego, canción o contexto. No inventes nombres; la herramienta buscará en el catálogo de Supabase y ofrecerá opciones si hay ambigüedad. No afirmes éxito antes de recibir el resultado.',parameters:{type:'object',properties:{accion:{type:'string',enum:['play','pause','stop']},nombre:{type:'string',description:'Nombre del video o del juego cuando la acción sea play'}},required:['accion'],additionalProperties:false}},{type:'function',name:MEMORY_TOOL,description:'Guarda un recuerdo permanente SOLO cuando el organizador lo pide explícitamente, por ejemplo: Supervisor, recuerda que Carlos ganó el juego 2. No guardes rumores, conversaciones privadas, comentarios de invitados ni deducciones.',parameters:{type:'object',properties:{hecho:{type:'string',description:'Hecho breve confirmado por el organizador (máximo 2000 caracteres).'}},required:['hecho'],additionalProperties:false}}],
   tool_choice:'auto'
  }});
@@ -471,7 +482,7 @@ function controls(active){if(interruptBtn)interruptBtn.disabled=!active;startBtn
 async function checkAdmin(){if(!sg){sgError('No hay conexión con Supabase.');return}const {data:{user},error:userError}=await sg.auth.getUser();if(userError){sgError(userError.message);return}let admin=false;if(user){const {data,error}=await sg.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();if(error)throw error;admin=!!data}loginPanel.hidden=admin;voicePanel.hidden=!admin;if(admin){document.getElementById('account').textContent=user.email;sgError('')}else if(user){sgError('Esta cuenta no tiene permisos de administrador.');document.getElementById('loginForm').hidden=true}}
 document.getElementById('loginForm').addEventListener('submit',async e=>{e.preventDefault();const {error}=await sg.auth.signInWithPassword({email:document.getElementById('email').value,password:document.getElementById('password').value});if(error)sgError(error.message);else await checkAdmin()});
 document.getElementById('logout').addEventListener('click',async()=>{stop();await sg.auth.signOut();location.reload()});
-function stop(){clearConversationIdle();conversationAwake=false;wakeGateBusy=false;playbackActive=false;interruptionRequested=false;supervisorSpeaking=false;pendingAttention=false;toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();processedVideoCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=true;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
+function stop(){clearWakeTranscript();clearConversationIdle();conversationAwake=false;wakeGateBusy=false;playbackActive=false;interruptionRequested=false;supervisorSpeaking=false;pendingAttention=false;toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();processedVideoCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=true;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
 startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=true;controls(false);status('Conectando…');sgError('');try{
    await loadMemories();
    try{await loadSupervisorGames()}catch(err){
