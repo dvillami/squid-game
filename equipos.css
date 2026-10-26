@@ -77,3 +77,5 @@ body.teams-page{background:radial-gradient(ellipse at 90% 5%,#412135 0%,transpar
 .teams-page #gate-message{color:#ff9ab9;font-size:13px}
 
 .team-member.roulette-sentenced{outline:3px solid #ffae32;outline-offset:-3px;box-shadow:0 0 18px #ffae3266}.team-sentence,.team-prize{font-size:12px;padding:8px}
+
+.team-sentence-all{font-size:12px;padding:8px;background:#b76a17;color:#fff;border:1px solid #ffb13b;border-radius:8px;cursor:pointer}.team-sentence-all:disabled{opacity:.45;cursor:not-allowed}
