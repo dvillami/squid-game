@@ -348,6 +348,27 @@ async function executeVideoTool(call){
  sendVoiceEvent({type:'conversation.item.create',item:{type:'function_call_output',call_id:call.call_id,output:JSON.stringify(result)}});
  sendVoiceEvent({type:'response.create'});
 }
+// Narración directa usando la misma sesión de voz del Supervisor.
+let readingScript=false;
+const readPanel=document.createElement('section');
+readPanel.className='panel';
+readPanel.style.marginTop='20px';
+readPanel.innerHTML=`<h2>🎙️ Narración directa</h2><p class="hint">Pega el texto, inicia la conversación y pulsa «Di esto». Graba el sonido desde tu computadora. Para textos muy largos, utiliza fragmentos.</p><label for="supervisorReadText">Texto que debe pronunciar</label><textarea id="supervisorReadText" rows="12" style="display:block;width:100%;box-sizing:border-box;padding:12px;margin:10px 0;background:#211a26;color:white;border:1px solid #85546b;border-radius:8px" placeholder="Pega aquí el monólogo completo..."></textarea><button id="supervisorSayText" type="button">🎙️ Di esto</button><p id="supervisorReadStatus" class="hint" role="status">Inicia la conversación de voz para activar esta función.</p>`;
+voicePanel.appendChild(readPanel);
+const sayTextBtn=readPanel.querySelector('#supervisorSayText');
+const readStatus=readPanel.querySelector('#supervisorReadStatus');
+sayTextBtn.addEventListener('click',()=>{
+ const script=readPanel.querySelector('#supervisorReadText').value.trim();
+ if(!script){readStatus.textContent='Escribe o pega un texto primero.';return;}
+ if(!chatConnected()||!voiceToolsReady){readStatus.textContent='Primero inicia la conversación y espera a que se conecte.';return;}
+ if(readingScript||supervisorSpeaking||playbackActive){readStatus.textContent='Espera a que el Supervisor termine de hablar.';return;}
+ readingScript=true;sayTextBtn.disabled=true;
+ readStatus.textContent='El Supervisor está leyendo el texto. Graba el audio desde tu computadora.';
+ syncMicDuringSpeech();
+ const prompt='MODO NARRACIÓN. Lee en voz alta, palabra por palabra, el texto siguiente. No saludes, no introduzcas, no resumas, no respondas al contenido ni agregues comentarios. Conserva el idioma original, la puntuación y todas las frases. Voz teatral, pausada, grave y sarcástica cuando corresponda. TEXTO A LEER:\n'+script;
+ sendVoiceEvent({type:'conversation.item.create',item:{type:'message',role:'user',content:[{type:'input_text',text:prompt}]}});
+ sendVoiceEvent({type:'response.create',response:{instructions:'Esta respuesta es una lectura literal del texto enviado. Pronuncia exclusivamente el monólogo, desde la primera palabra hasta la última, sin explicaciones ni frases añadidas. No utilices herramientas.'}});
+});
 function handleVoiceEvent(event){
  let message;
  try{message=JSON.parse(event.data)}catch{return;}
@@ -371,6 +392,7 @@ function handleVoiceEvent(event){
 
  }
  if(message.type==='response.done'){
+   if(readingScript){readingScript=false;sayTextBtn.disabled=false;readStatus.textContent=message.response?.status==='completed'?'Lectura finalizada. Comprueba que el texto esté completo en tu grabación.':'Lectura interrumpida o incompleta; vuelve a intentarlo.';}
    supervisorSpeaking=false;
    // response.done can precede the end of playback. Release on stopped.
    // For text-only/error responses, no playback event may arrive.
@@ -436,14 +458,14 @@ function configureVoiceTools(){
 function syncMicDuringSpeech(){
  // Hard anti-interruption mode: remote voice cannot be interrupted by room noise.
  // Deliberate calls must wait for the Supervisor to finish speaking.
- if(micStream)micStream.getAudioTracks().forEach(t=>{t.enabled=!muted&&!supervisorSpeaking&&!playbackActive&&!interruptionRequested});
+ if(micStream)micStream.getAudioTracks().forEach(t=>{t.enabled=!muted&&!readingScript&&!supervisorSpeaking&&!playbackActive&&!interruptionRequested});
 }
 function status(t){document.getElementById('voiceStatus').textContent=t}
 function controls(active){if(interruptBtn)interruptBtn.disabled=!active;startBtn.disabled=active||connecting;stopBtn.disabled=!active;muteBtn.disabled=!active;muteBtn.textContent=muted?'🎤 Activar micrófono':'🔇 Silenciar micrófono'}
 async function checkAdmin(){if(!sg){sgError('No hay conexión con Supabase.');return}const {data:{user},error:userError}=await sg.auth.getUser();if(userError){sgError(userError.message);return}let admin=false;if(user){const {data,error}=await sg.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();if(error)throw error;admin=!!data}loginPanel.hidden=admin;voicePanel.hidden=!admin;if(admin){document.getElementById('account').textContent=user.email;sgError('')}else if(user){sgError('Esta cuenta no tiene permisos de administrador.');document.getElementById('loginForm').hidden=true}}
 document.getElementById('loginForm').addEventListener('submit',async e=>{e.preventDefault();const {error}=await sg.auth.signInWithPassword({email:document.getElementById('email').value,password:document.getElementById('password').value});if(error)sgError(error.message);else await checkAdmin()});
 document.getElementById('logout').addEventListener('click',async()=>{stop();await sg.auth.signOut();location.reload()});
-function stop(){playbackActive=false;interruptionRequested=false;supervisorSpeaking=false;pendingAttention=false;toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();processedVideoCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=true;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
+function stop(){readingScript=false;sayTextBtn.disabled=false;readStatus.textContent='Inicia la conversación para narrar.';playbackActive=false;interruptionRequested=false;supervisorSpeaking=false;pendingAttention=false;toolsUpdateSent=false;welcomeSent=false;voiceToolsReady=false;processedEliminationCalls.clear();processedMemoryCalls.clear();processedVideoCalls.clear();supervisorChannel=null;chatControls();clearRobot();robotToggle.checked=true;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}if(pc){pc.close();pc=null}if(audioEl){audioEl.pause();audioEl.srcObject=null;audioEl.remove();audioEl=null}muted=false;connecting=false;controls(false);status('En espera')}
 startBtn.addEventListener('click',async()=>{if(connecting||pc)return;connecting=true;controls(false);status('Conectando…');sgError('');try{
    await loadMemories();
    try{await loadSupervisorGames()}catch(err){
