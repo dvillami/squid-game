@@ -54,10 +54,33 @@ function showMember({person,team}){
  }else photo.append(sgElement('span','','○'));
  photo.append(sgElement('span','member-id',String(person.id).padStart(3,'0')));
  card.append(photo,sgElement('div','member-name',person.name||'Participante'));
+ const statusBadge=sgElement('div','member-status');card.append(statusBadge);
  root.append(card);
  const total=root.querySelectorAll('.team-member').length;
  $(`size-${team}`).textContent=`${total} integrante${total===1?'':'s'}`;
- card.dataset.playerId=String(person.id);card._participant=person;
+ card.dataset.playerId=String(person.id);card._participant=person;applyMemberStatus(card,person.status||(person.eliminated?'eliminated':'active'));
+}
+function applyMemberStatus(card,status){
+ const normalized=status==='eliminated'?'eliminated':status==='sentenced'?'sentenced':'active';
+ card._participant.status=normalized;card._participant.eliminated=normalized==='eliminated';
+ card.classList.toggle('roulette-sentenced',normalized==='sentenced');
+ card.classList.toggle('roulette-eliminated',normalized==='eliminated');
+ const label=card.querySelector('.member-status');
+ if(label){label.textContent=normalized==='sentenced'?'⚖ SENTENCIADO':normalized==='eliminated'?'✕ ELIMINADO':'ACTIVO';label.dataset.status=normalized;}
+}
+function refreshPoolCounter(){
+ pool=pool.filter(p=>p.status!=='eliminated'&&!p.eliminated);
+ $('pool-count').textContent=`${pool.length} participantes en juego`;
+}
+async function refreshTeamStatuses(team){
+ const cards=[...$(`members-${team}`).querySelectorAll('.team-member')];
+ if(!cards.length)return;
+ const ids=cards.map(card=>Number(card.dataset.playerId));
+ const {data,error}=await sg.from('participants').select('id,status,eliminated').in('id',ids);
+ if(error)throw Error('No se pudo verificar el estado actual: '+error.message);
+ const byId=new Map((data||[]).map(p=>[Number(p.id),p]));
+ for(const card of cards){const p=byId.get(Number(card.dataset.playerId));if(p)applyMemberStatus(card,p.status||(p.eliminated?'eliminated':'active'));}
+ refreshPoolCounter();updatePickButtons();
 }
 function updateProgress(){
  $('draw-count').textContent=`${cursor} / ${sequence.length} asignados`;
@@ -110,7 +133,7 @@ async function loadPlayers(){
  const {data,error}=await sg.from('participants').select('id,name,photo_url,eliminated,status').order('id');
  if(error){sgError('Error al cargar participantes: '+error.message);setMachine('ERROR','No se pudieron cargar los jugadores.');return}
  // Misma selección de 18 plazas que el tablero. Los eliminados no participan.
- pool=(data||[]).filter(p=>Number(p.id)<=18&&!p.eliminated);
+ pool=(data||[]).filter(p=>Number(p.id)<=18&&p.status!=='eliminated'&&!p.eliminated);
  $('pool-count').textContent=`${pool.length} participantes en juego`;
  startBtn.disabled=!adminAuthorized||pool.length<Number(countSelect.value);updatePickButtons();
  if(pool.length<2)setMachine('SIN PARTICIPANTES','Se necesitan al menos dos jugadores activos.');
@@ -161,7 +184,7 @@ function updatePickButtons(){
  document.querySelectorAll('.team-pick,.team-sentence,.team-sentence-all,.team-prize').forEach(button=>{
   const members=$(`members-${button.dataset.team}`);
   const available=members?[...members.querySelectorAll('.team-member:not(.roulette-eliminated)')]:[];
-  const eligible=button.classList.contains('team-sentence')||button.classList.contains('team-sentence-all')?available.filter(card=>!card.classList.contains('roulette-sentenced')):available;
+  const eligible=available;
   button.disabled=!adminAuthorized||running||rouletteBusy||eligible.length===0;
   button.title=!adminAuthorized?'Inicia sesión como administrador para eliminar':running?'Espera a que termine el sorteo':available.length?'Seleccionar un jugador activo':'Sin integrantes disponibles';
  });
@@ -216,18 +239,24 @@ $('code-form').addEventListener('submit',async event=>{
  const team=pendingTeam;
  if(team===null||rouletteBusy)return;
  codeDialog.close();
- if(pendingAction==='sentence_team')await sentenceWholeTeam(team,code);else await roulette(team,code,pendingAction);
+ try{await refreshTeamStatuses(team);if(pendingAction==='sentence_team')await sentenceWholeTeam(team,code);else await roulette(team,code,pendingAction);}catch(error){sgError(error.message||String(error));}
 });
 async function roulette(team,code,action='eliminate'){
  if(!adminAuthorized||running||rouletteBusy)return;
- const members=[...$(`members-${team}`).querySelectorAll(action==='sentence'?'.team-member:not(.roulette-eliminated):not(.roulette-sentenced)':'.team-member:not(.roulette-eliminated)')];
+ const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated)')];
  if(!members.length)return;
  rouletteBusy=true;updatePickButtons();sgError('');
  const chosen=members[randomIndex(members.length)];
  const person=chosen._participant;
- setMachine('SELECCIÓN EN CURSO',`El Supervisor está decidiendo en el equipo ${team+1}…`,true);
+ setMachine('VALIDANDO CÓDIGO',`Verificando autorización antes del sorteo del Equipo ${team+1}…`,true);
  let previous=null;
  try{
+  // Confirmar y consumir el código en Supabase ANTES de iniciar cualquier animación.
+  // Una validación separada no sería suficiente: otro proceso podría usar el código entre ambas llamadas.
+  const priorStatus=person.status||'active';
+  const warning=action==='sentence'?await persistSentence(person,code):await persistElimination(person,code);
+  const newStatus=action==='eliminate'||priorStatus==='sentenced'?'eliminated':'sentenced';
+  setMachine('SELECCIÓN EN CURSO',`El Supervisor está decidiendo en el equipo ${team+1}…`,true);
   // La selección se fija de antemano. La luz recorre todos y desacelera.
   const spins=Math.max(15,members.length*3),startIndex=randomIndex(members.length);
   let index=startIndex;
@@ -241,23 +270,21 @@ async function roulette(team,code,action='eliminate'){
   }
   previous?.classList.remove('roulette-lit');
   chosen.classList.add('roulette-lit','roulette-selected');beep();
-  setMachine('JUGADOR SELECCIONADO',`${person.name} · Verificando eliminación…`,true);
-  const warning=action==='sentence'?await persistSentence(person,code):await persistElimination(person,code);
-  chosen.classList.remove('roulette-lit');if(action==='eliminate'){chosen.classList.add('roulette-eliminated');pool=pool.filter(p=>p.id!==person.id);}else{chosen.classList.add('roulette-sentenced');person.status='sentenced';}
-  $('pool-count').textContent=`${pool.length} participantes en juego`;
-  showEliminationNotice(person,team,action==='sentence'?'sentenced':'eliminated');
-  setMachine(action==='sentence'?'SENTENCIA CONFIRMADA':'ELIMINACIÓN CONFIRMADA',`${person.name} ha sido ${action==='sentence'?'sentenciado':'eliminado'} del Equipo ${team+1}.`);
+  setMachine('JUGADOR SELECCIONADO',`${person.name} · Resultado confirmado.`,true);
+  chosen.classList.remove('roulette-lit');applyMemberStatus(chosen,newStatus);refreshPoolCounter();
+  showEliminationNotice(person,team,newStatus);
+  setMachine(newStatus==='sentenced'?'SENTENCIA CONFIRMADA':'ELIMINACIÓN CONFIRMADA',`${person.name} ha sido ${newStatus==='sentenced'?'sentenciado':'eliminado'} del Equipo ${team+1}.`);
   if(warning)sgError('Aviso: '+warning);
  }catch(error){
   chosen.classList.remove('roulette-selected','roulette-lit');
   previous?.classList.remove('roulette-lit');
-  setMachine('ELIMINACIÓN NO CONFIRMADA','No se mostró aviso de eliminación porque la base de datos no la confirmó.');
-  sgError('No se pudo eliminar: '+(error?.message||String(error)));
+  setMachine('OPERACIÓN NO COMPLETADA','Comprueba el mensaje de error. Si la animación se interrumpió, actualiza la página para consultar el estado real.');
+  sgError('No se pudo actualizar el estado: '+(error?.message||String(error)));
  }finally{rouletteBusy=false;updatePickButtons()}
 }
 
 async function persistSentence(person,code){const {error}=await sg.rpc('supervisor_change_status',{p_player_id:Number(person.id),p_code:code,p_action:'sentence'});if(error)throw Error(error.message);return '';}
-function askSentenceCode(team){if(!adminAuthorized||running||rouletteBusy)return;const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated):not(.roulette-sentenced)')];if(!members.length){sgError('No hay jugadores activos para sentenciar.');return;}pendingTeam=team;pendingAction='sentence';$('code-team').textContent=`SENTENCIAR · EQUIPO ${team+1} · ${members.length} candidatos`;$('code-error').hidden=true;codeInput.value='';codeDialog.showModal();codeInput.focus();}
+function askSentenceCode(team){if(!adminAuthorized||running||rouletteBusy)return;const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated)')];if(!members.length){sgError('No hay jugadores disponibles.');return;}pendingTeam=team;pendingAction='sentence';$('code-team').textContent=`AVANZAR ESTADO · EQUIPO ${team+1} · ${members.length} candidatos`;$('code-error').hidden=true;codeInput.value='';codeDialog.showModal();codeInput.focus();}
 async function rafflePrize(team){
  if(!adminAuthorized||running||rouletteBusy)return;
  const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated)')];
@@ -298,32 +325,35 @@ async function rafflePrize(team){
 // Una sola transacción y un único código para todos los miembros activos del equipo.
 function askSentenceTeamCode(team){
  if(!adminAuthorized||running||rouletteBusy)return;
- const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated):not(.roulette-sentenced)')];
- if(!members.length){sgError('No hay integrantes activos para sentenciar.');return;}
+ const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated)')];
+ if(!members.length){sgError('No hay integrantes pendientes de eliminación.');return;}
  pendingTeam=team;pendingAction='sentence_team';
  $('code-team').textContent=`SENTENCIAR TODO EL EQUIPO ${team+1} · ${members.length} jugadores · UN SOLO CÓDIGO`;
  $('code-error').hidden=true;codeInput.value='';codeDialog.showModal();codeInput.focus();
 }
 async function sentenceWholeTeam(team,code){
  if(!adminAuthorized||running||rouletteBusy)return;
- const cards=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated):not(.roulette-sentenced)')];
+ const cards=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated)')];
  if(!cards.length)return;
  rouletteBusy=true;updatePickButtons();sgError('');
  setMachine('SENTENCIANDO EQUIPO',`Validando un código para ${cards.length} participantes del Equipo ${team+1}…`,true);
  try{
   const ids=cards.map(card=>Number(card._participant.id));
+  const before=new Map(cards.map(card=>[Number(card.dataset.playerId),card._participant.status]));
   const {data,error}=await sg.rpc('supervisor_sentence_team',{p_player_ids:ids,p_code:code});
-  if(error)throw Error(error.message||'No se pudo sentenciar al equipo.');
-  for(const card of cards){card.classList.add('roulette-sentenced');card._participant.status='sentenced';}
+  if(error)throw Error(error.message||'No se pudo cambiar el estado del equipo.');
+  await refreshTeamStatuses(team);
+  const sentenced=cards.filter(card=>before.get(Number(card.dataset.playerId))==='active'&&card._participant.status==='sentenced').length;
+  const eliminated=cards.filter(card=>before.get(Number(card.dataset.playerId))==='sentenced'&&card._participant.status==='eliminated').length;
   const notice=$('team-elimination-notice');clearTimeout(noticeTimer);
-  notice.classList.add('sentencing-notice');notice.querySelector('.notice-out').textContent='EQUIPO SENTENCIADO';
-  $('winner-number').textContent=`EQUIPO ${team+1} · ${cards.length} SENTENCIADOS`;
-  $('winner-name').textContent=`TODOS LOS INTEGRANTES ACTIVOS`;
-  $('winner-text').textContent='El equipo ha sido sentenciado. El tablero se actualizará automáticamente.';
+  notice.classList.add('sentencing-notice');notice.querySelector('.notice-out').textContent='SENTENCIA DEL EQUIPO';
+  $('winner-number').textContent=`EQUIPO ${team+1}`;
+  $('winner-name').textContent='SENTENCIA EJECUTADA';
+  $('winner-text').textContent=`${sentenced} sentenciado(s) y ${eliminated} eliminado(s). El tablero se actualizará automáticamente.`;
   $('winner-photo').textContent='⚖️';
   notice.hidden=false;notice.classList.remove('visible');void notice.offsetWidth;notice.classList.add('visible');
   noticeTimer=setTimeout(()=>{notice.classList.remove('visible');setTimeout(()=>notice.hidden=true,450)},4600);
-  setMachine('EQUIPO SENTENCIADO',`${cards.length} participantes del Equipo ${team+1} fueron sentenciados con un solo código.`);
+  setMachine('ESTADOS ACTUALIZADOS',`${sentenced} sentenciado(s) y ${eliminated} eliminado(s) en el Equipo ${team+1}, con un solo código.`);
  }catch(error){setMachine('SENTENCIA NO CONFIRMADA','Ningún estado local fue modificado.');sgError('No se pudo sentenciar al equipo: '+(error?.message||String(error)));}
  finally{rouletteBusy=false;updatePickButtons();}
 }
