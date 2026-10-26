@@ -258,7 +258,42 @@ async function roulette(team,code,action='eliminate'){
 
 async function persistSentence(person,code){const {error}=await sg.rpc('supervisor_change_status',{p_player_id:Number(person.id),p_code:code,p_action:'sentence'});if(error)throw Error(error.message);return '';}
 function askSentenceCode(team){if(!adminAuthorized||running||rouletteBusy)return;const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated):not(.roulette-sentenced)')];if(!members.length){sgError('No hay jugadores activos para sentenciar.');return;}pendingTeam=team;pendingAction='sentence';$('code-team').textContent=`SENTENCIAR · EQUIPO ${team+1} · ${members.length} candidatos`;$('code-error').hidden=true;codeInput.value='';codeDialog.showModal();codeInput.focus();}
-async function rafflePrize(team){if(!adminAuthorized||running||rouletteBusy)return;const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated)')];if(!members.length)return;rouletteBusy=true;updatePickButtons();try{const chosen=members[randomIndex(members.length)],person=chosen._participant;const {error}=await sg.rpc('supervisor_award_prize',{p_player_id:Number(person.id),p_team_number:team+1});if(error)throw Error(error.message);showEliminationNotice(person,team,'prize');setMachine('PREMIO SORTEADO',`${person.name} ganó un premio del Equipo ${team+1}.`);}catch(e){sgError('No se pudo registrar el premio: '+e.message)}finally{rouletteBusy=false;updatePickButtons()}}
+async function rafflePrize(team){
+ if(!adminAuthorized||running||rouletteBusy)return;
+ const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated)')];
+ if(!members.length){sgError('No hay participantes disponibles para el sorteo.');return;}
+ rouletteBusy=true;updatePickButtons();sgError('');
+ const chosen=members[randomIndex(members.length)],person=chosen._participant;
+ let previous=null;
+ try{
+  setMachine('SORTEO DE PREMIO',`La suerte recorre las casillas del Equipo ${team+1}…`,true);
+  // Igual que en la eliminación: luz por cada casilla, sonidos y desaceleración.
+  const spins=Math.max(15,members.length*3),startIndex=randomIndex(members.length);
+  let index=startIndex;
+  for(let step=0;step<spins;step++){
+   previous?.classList.remove('roulette-lit');
+   const card=members[index];card.classList.add('roulette-lit');previous=card;
+   beep();
+   const t=step/Math.max(1,spins-1);
+   await delay(Math.round(75+560*t*t*t));
+   index=(index+1)%members.length;
+  }
+  previous?.classList.remove('roulette-lit');previous=null;
+  chosen.classList.add('roulette-lit','roulette-selected');beep();
+  setMachine('GANADOR SELECCIONADO',`${person.name} · Registrando el premio…`,true);
+  const {error}=await sg.rpc('supervisor_award_prize',{p_player_id:Number(person.id),p_team_number:team+1});
+  if(error)throw Error(error.message);
+  showEliminationNotice(person,team,'prize');
+  setMachine('PREMIO SORTEADO',`${person.name} ganó un premio del Equipo ${team+1}.`);
+ }catch(e){
+  setMachine('SORTEO NO CONFIRMADO','No se pudo registrar el premio.');
+  sgError('No se pudo registrar el premio: '+(e?.message||String(e)));
+ }finally{
+  previous?.classList.remove('roulette-lit');
+  chosen.classList.remove('roulette-lit','roulette-selected');
+  rouletteBusy=false;updatePickButtons();
+ }
+}
 
 // Una sola transacción y un único código para todos los miembros activos del equipo.
 function askSentenceTeamCode(team){
