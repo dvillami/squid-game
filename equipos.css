@@ -79,3 +79,9 @@ body.teams-page{background:radial-gradient(ellipse at 90% 5%,#412135 0%,transpar
 .team-member.roulette-sentenced{outline:3px solid #ffae32;outline-offset:-3px;box-shadow:0 0 18px #ffae3266}.team-sentence,.team-prize{font-size:12px;padding:8px}
 
 .team-sentence-all{font-size:12px;padding:8px;background:#b76a17;color:#fff;border:1px solid #ffb13b;border-radius:8px;cursor:pointer}.team-sentence-all:disabled{opacity:.45;cursor:not-allowed}
+
+/* Estado visible en cada tarjeta, incluso después de actualizar el sorteo. */
+.member-status{font-size:9px;font-weight:900;letter-spacing:.4px;padding:4px 2px;background:#173c30;color:#a9f5d3;}
+.member-status[data-status="sentenced"]{background:#a75b09;color:#fff4ce;}
+.member-status[data-status="eliminated"]{background:#70162f;color:#ffe0e9;}
+.team-member.roulette-sentenced .member-photo{background:#75400b;}

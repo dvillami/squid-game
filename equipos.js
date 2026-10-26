@@ -248,15 +248,9 @@ async function roulette(team,code,action='eliminate'){
  rouletteBusy=true;updatePickButtons();sgError('');
  const chosen=members[randomIndex(members.length)];
  const person=chosen._participant;
- setMachine('VALIDANDO CÓDIGO',`Verificando autorización antes del sorteo del Equipo ${team+1}…`,true);
+ setMachine('SELECCIÓN EN CURSO',`El Supervisor está decidiendo en el equipo ${team+1}…`,true);
  let previous=null;
  try{
-  // Confirmar y consumir el código en Supabase ANTES de iniciar cualquier animación.
-  // Una validación separada no sería suficiente: otro proceso podría usar el código entre ambas llamadas.
-  const priorStatus=person.status||'active';
-  const warning=action==='sentence'?await persistSentence(person,code):await persistElimination(person,code);
-  const newStatus=action==='eliminate'||priorStatus==='sentenced'?'eliminated':'sentenced';
-  setMachine('SELECCIÓN EN CURSO',`El Supervisor está decidiendo en el equipo ${team+1}…`,true);
   // La selección se fija de antemano. La luz recorre todos y desacelera.
   const spins=Math.max(15,members.length*3),startIndex=randomIndex(members.length);
   let index=startIndex;
@@ -270,7 +264,10 @@ async function roulette(team,code,action='eliminate'){
   }
   previous?.classList.remove('roulette-lit');
   chosen.classList.add('roulette-lit','roulette-selected');beep();
-  setMachine('JUGADOR SELECCIONADO',`${person.name} · Resultado confirmado.`,true);
+  setMachine('JUGADOR SELECCIONADO',`${person.name} · Verificando eliminación…`,true);
+  const priorStatus=person.status||'active';
+  const warning=action==='sentence'?await persistSentence(person,code):await persistElimination(person,code);
+  const newStatus=action==='eliminate'||priorStatus==='sentenced'?'eliminated':'sentenced';
   chosen.classList.remove('roulette-lit');applyMemberStatus(chosen,newStatus);refreshPoolCounter();
   showEliminationNotice(person,team,newStatus);
   setMachine(newStatus==='sentenced'?'SENTENCIA CONFIRMADA':'ELIMINACIÓN CONFIRMADA',`${person.name} ha sido ${newStatus==='sentenced'?'sentenciado':'eliminado'} del Equipo ${team+1}.`);
@@ -278,7 +275,7 @@ async function roulette(team,code,action='eliminate'){
  }catch(error){
   chosen.classList.remove('roulette-selected','roulette-lit');
   previous?.classList.remove('roulette-lit');
-  setMachine('OPERACIÓN NO COMPLETADA','Comprueba el mensaje de error. Si la animación se interrumpió, actualiza la página para consultar el estado real.');
+  setMachine('CAMBIO NO CONFIRMADO','La base de datos no confirmó el cambio de estado.');
   sgError('No se pudo actualizar el estado: '+(error?.message||String(error)));
  }finally{rouletteBusy=false;updatePickButtons()}
 }
