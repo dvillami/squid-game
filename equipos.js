@@ -38,7 +38,7 @@ function buildTeams(n){
   const head=sgElement('div','team-head'),title=sgElement('h2','',`EQUIPO ${i+1}`);
   const size=sgElement('span','',`0 integrantes`);size.id=`size-${i}`;
   head.append(title,size);
-  const pick=sgElement('button','team-pick','🎯 Elegir eliminado');pick.type='button';pick.disabled=true;pick.dataset.team=String(i);pick.addEventListener('click',()=>askEliminationCode(i));head.append(pick);
+  const pick=sgElement('button','team-pick','🎯 Elegir eliminado');pick.type='button';pick.disabled=true;pick.dataset.team=String(i);pick.addEventListener('click',()=>askEliminationCode(i));head.append(pick);const sentence=sgElement('button','team-sentence','⚖️ Sentenciar');sentence.type='button';sentence.dataset.team=String(i);sentence.addEventListener('click',()=>askSentenceCode(i));head.append(sentence);const prize=sgElement('button','team-prize','🎁 Rifar premio');prize.type='button';prize.dataset.team=String(i);prize.addEventListener('click',()=>rafflePrize(i));head.append(prize);
   const members=sgElement('div','team-members');members.id=`members-${i}`;
   members.append(sgElement('p','empty-team','Esperando sorteo…'));
   box.append(head,members);root.append(box);
@@ -107,7 +107,7 @@ countSelect.addEventListener('change',()=>{
 });
 async function loadPlayers(){
  if(!sgConfigured||!sg){sgError('No se pudo conectar con Supabase. Comprueba config.js.');setMachine('SIN CONEXIÓN','Revisa la configuración.');return}
- const {data,error}=await sg.from('participants').select('id,name,photo_url,eliminated').order('id');
+ const {data,error}=await sg.from('participants').select('id,name,photo_url,eliminated,status').order('id');
  if(error){sgError('Error al cargar participantes: '+error.message);setMachine('ERROR','No se pudieron cargar los jugadores.');return}
  // Misma selección de 18 plazas que el tablero. Los eliminados no participan.
  pool=(data||[]).filter(p=>Number(p.id)<=18&&!p.eliminated);
@@ -158,7 +158,7 @@ $('team-login').addEventListener('submit',async e=>{
 });
 if(sg)checkTeamAdmin();
 function updatePickButtons(){
- document.querySelectorAll('.team-pick').forEach(button=>{
+ document.querySelectorAll('.team-pick,.team-sentence,.team-prize').forEach(button=>{
   const members=$(`members-${button.dataset.team}`);
   const available=members?[...members.querySelectorAll('.team-member:not(.roulette-eliminated)')]:[];
   button.disabled=!adminAuthorized||running||rouletteBusy||available.length===0;
@@ -171,11 +171,12 @@ function randomIndex(length){
  do{crypto.getRandomValues(values)}while(values[0]>=limit);
  return values[0]%length;
 }
-function showEliminationNotice(person,team){
- const notice=$('team-elimination-notice');clearTimeout(noticeTimer);
+function showEliminationNotice(person,team,kind='eliminated'){
+ const sentenced=kind==='sentenced',prize=kind==='prize';
+ const notice=$('team-elimination-notice');clearTimeout(noticeTimer);notice.classList.toggle('sentencing-notice',sentenced||prize);notice.querySelector('.notice-out').textContent=prize?'GANADOR DEL PREMIO':sentenced?'SENTENCIADO':'ELIMINADO';
  $('winner-number').textContent=`EQUIPO ${team+1} · JUGADOR ${String(person.id).padStart(3,'0')}`;
  $('winner-name').textContent=person.name||'Participante';
- $('winner-text').textContent='El jugador ha sido eliminado. El tablero se actualizará automáticamente.';
+ $('winner-text').textContent=prize?'¡El equipo tiene un ganador! El estado del jugador no cambia.':sentenced?'El jugador ha sido sentenciado. El tablero se actualizará automáticamente.':'El jugador ha sido eliminado. El tablero se actualizará automáticamente.';
  const photo=$('winner-photo');photo.replaceChildren();
  if(sgPhoto(person.photo_url)){
   const img=sgElement('img');img.src=person.photo_url;img.alt=person.name||'Participante';
@@ -192,12 +193,12 @@ async function persistElimination(person,code){
  return '';
 }
 const codeDialog=$('code-dialog'),codeInput=$('secret-code');
-let pendingTeam=null;
+let pendingTeam=null,pendingAction='eliminate';
 function askEliminationCode(team){
  if(!adminAuthorized||running||rouletteBusy)return;
  const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated)')];
  if(!members.length)return;
- pendingTeam=team;
+ pendingTeam=team;pendingAction='eliminate';
  $('code-team').textContent=`EQUIPO ${team+1} · ${members.length} participantes disponibles`;
  $('code-error').hidden=true;codeInput.value='';
  codeDialog.showModal();codeInput.focus();
@@ -214,11 +215,11 @@ $('code-form').addEventListener('submit',async event=>{
  const team=pendingTeam;
  if(team===null||rouletteBusy)return;
  codeDialog.close();
- await roulette(team,code);
+ await roulette(team,code,pendingAction);
 });
-async function roulette(team,code){
+async function roulette(team,code,action='eliminate'){
  if(!adminAuthorized||running||rouletteBusy)return;
- const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated)')];
+ const members=[...$(`members-${team}`).querySelectorAll(action==='sentence'?'.team-member:not(.roulette-eliminated):not(.roulette-sentenced)':'.team-member:not(.roulette-eliminated)')];
  if(!members.length)return;
  rouletteBusy=true;updatePickButtons();sgError('');
  const chosen=members[randomIndex(members.length)];
@@ -240,12 +241,11 @@ async function roulette(team,code){
   previous?.classList.remove('roulette-lit');
   chosen.classList.add('roulette-lit','roulette-selected');beep();
   setMachine('JUGADOR SELECCIONADO',`${person.name} · Verificando eliminación…`,true);
-  const warning=await persistElimination(person,code);
-  chosen.classList.remove('roulette-lit');chosen.classList.add('roulette-eliminated');
-  pool=pool.filter(p=>p.id!==person.id);
+  const warning=action==='sentence'?await persistSentence(person,code):await persistElimination(person,code);
+  chosen.classList.remove('roulette-lit');if(action==='eliminate'){chosen.classList.add('roulette-eliminated');pool=pool.filter(p=>p.id!==person.id);}else{chosen.classList.add('roulette-sentenced');person.status='sentenced';}
   $('pool-count').textContent=`${pool.length} participantes en juego`;
-  showEliminationNotice(person,team);
-  setMachine('ELIMINACIÓN CONFIRMADA',`${person.name} ha sido eliminado del Equipo ${team+1}.`);
+  showEliminationNotice(person,team,action==='sentence'?'sentenced':'eliminated');
+  setMachine(action==='sentence'?'SENTENCIA CONFIRMADA':'ELIMINACIÓN CONFIRMADA',`${person.name} ha sido ${action==='sentence'?'sentenciado':'eliminado'} del Equipo ${team+1}.`);
   if(warning)sgError('Aviso: '+warning);
  }catch(error){
   chosen.classList.remove('roulette-selected','roulette-lit');
@@ -254,3 +254,7 @@ async function roulette(team,code){
   sgError('No se pudo eliminar: '+(error?.message||String(error)));
  }finally{rouletteBusy=false;updatePickButtons()}
 }
+
+async function persistSentence(person,code){const {error}=await sg.rpc('supervisor_change_status',{p_player_id:Number(person.id),p_code:code,p_action:'sentence'});if(error)throw Error(error.message);return '';}
+function askSentenceCode(team){if(!adminAuthorized||running||rouletteBusy)return;const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated):not(.roulette-sentenced)')];if(!members.length){sgError('No hay jugadores activos para sentenciar.');return;}pendingTeam=team;pendingAction='sentence';$('code-team').textContent=`SENTENCIAR · EQUIPO ${team+1} · ${members.length} candidatos`;$('code-error').hidden=true;codeInput.value='';codeDialog.showModal();codeInput.focus();}
+async function rafflePrize(team){if(!adminAuthorized||running||rouletteBusy)return;const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated)')];if(!members.length)return;rouletteBusy=true;updatePickButtons();try{const chosen=members[randomIndex(members.length)],person=chosen._participant;const {error}=await sg.rpc('supervisor_award_prize',{p_player_id:Number(person.id),p_team_number:team+1});if(error)throw Error(error.message);showEliminationNotice(person,team,'prize');setMachine('PREMIO SORTEADO',`${person.name} ganó un premio del Equipo ${team+1}.`);}catch(e){sgError('No se pudo registrar el premio: '+e.message)}finally{rouletteBusy=false;updatePickButtons()}}

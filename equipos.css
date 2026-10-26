@@ -75,3 +75,5 @@ body.teams-page{background:radial-gradient(ellipse at 90% 5%,#412135 0%,transpar
 .teams-page #gate-login label{display:flex;flex-direction:column;gap:5px}
 .teams-page #gate-login input{width:100%}
 .teams-page #gate-message{color:#ff9ab9;font-size:13px}
+
+.team-member.roulette-sentenced{outline:3px solid #ffae32;outline-offset:-3px;box-shadow:0 0 18px #ffae3266}.team-sentence,.team-prize{font-size:12px;padding:8px}

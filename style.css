@@ -168,3 +168,13 @@ body.board-page{background:radial-gradient(ellipse at 95% 10%,#57271e 0%,transpa
  .board-page .qr-invite img{width:98px;height:98px;}
 }
 .board-page .metrics{grid-template-columns:repeat(3,minmax(0,1fr));}
+
+/* Estados de sentencia */
+.player.sentenced{border:3px solid #ffae32!important;box-shadow:0 0 22px #ff9d2555!important}
+.player.sentenced .photo{outline:3px solid #ffae32;outline-offset:-3px}
+.player.sentenced .playerInfo span{color:#ffbe55!important}
+.elimination-notice.sentencing-notice{border-color:#ffae32;background:linear-gradient(140deg,#39270e,#141016 75%)}
+.sentencing-notice .notice-head{background:#66400c;color:#ffe1a1}
+.sentencing-notice .notice-out{color:#ffbd50}
+.sentencing-notice .notice-progress{background:#ffae32}
+.sentencing-notice .notice-photo img{filter:none}

@@ -1,0 +1,11 @@
+INSTALACIÓN EN DOS PASOS
+1. Haz una copia de seguridad de Supabase. En SQL Editor ejecuta ACTUALIZACION_SENTENCIAS.sql completo. Verifica que no aparezcan errores.
+2. Después publica los archivos del ZIP en GitHub Pages. No publiques primero el sitio.
+
+NUEVO: Activo / Sentenciado (naranja) / Eliminado (gris con X). Los códigos se consumen al sentenciar o eliminar. El botón de premio registra el ganador y lo añade a recuerdos.
+
+IMPORTANTE: el sorteo de equipos es local al navegador, no existe una tabla persistente de equipos en este proyecto. El premio registra el número de equipo y el jugador seleccionado, pero no puede validar la pertenencia al equipo en el servidor. Evita reiniciar equipos antes de rifar.
+
+SEGURIDAD: el proyecto original permite ciertas escrituras directas mediante las políticas RLS existentes. Revisa las políticas UPDATE de participants para impedir que usuarios no administradores cambien status/eliminated directamente. No se han modificado políticas desconocidas.
+
+El script SQL no ha sido ejecutado contra tu Supabase desde aquí. Prueba primero con jugadores de ensayo.
