@@ -38,7 +38,7 @@ function buildTeams(n){
   const head=sgElement('div','team-head'),title=sgElement('h2','',`EQUIPO ${i+1}`);
   const size=sgElement('span','',`0 integrantes`);size.id=`size-${i}`;
   head.append(title,size);
-  const pick=sgElement('button','team-pick','🎯 Elegir eliminado');pick.type='button';pick.disabled=true;pick.dataset.team=String(i);pick.addEventListener('click',()=>askEliminationCode(i));head.append(pick);const sentence=sgElement('button','team-sentence','⚖️ Sentenciar');sentence.type='button';sentence.dataset.team=String(i);sentence.addEventListener('click',()=>askSentenceCode(i));head.append(sentence);const prize=sgElement('button','team-prize','🎁 Rifar premio');prize.type='button';prize.dataset.team=String(i);prize.addEventListener('click',()=>rafflePrize(i));head.append(prize);
+  const pick=sgElement('button','team-pick','🎯 Elegir eliminado');pick.type='button';pick.disabled=true;pick.dataset.team=String(i);pick.addEventListener('click',()=>askEliminationCode(i));head.append(pick);const sentence=sgElement('button','team-sentence','⚖️ Sentenciar');sentence.type='button';sentence.dataset.team=String(i);sentence.addEventListener('click',()=>askSentenceCode(i));head.append(sentence);const groupSentence=sgElement('button','team-sentence-all','⚖️ Sentenciar equipo');groupSentence.type='button';groupSentence.dataset.team=String(i);groupSentence.addEventListener('click',()=>askSentenceTeamCode(i));head.append(groupSentence);const prize=sgElement('button','team-prize','🎁 Rifar premio');prize.type='button';prize.dataset.team=String(i);prize.addEventListener('click',()=>rafflePrize(i));head.append(prize);
   const members=sgElement('div','team-members');members.id=`members-${i}`;
   members.append(sgElement('p','empty-team','Esperando sorteo…'));
   box.append(head,members);root.append(box);
@@ -158,10 +158,11 @@ $('team-login').addEventListener('submit',async e=>{
 });
 if(sg)checkTeamAdmin();
 function updatePickButtons(){
- document.querySelectorAll('.team-pick,.team-sentence,.team-prize').forEach(button=>{
+ document.querySelectorAll('.team-pick,.team-sentence,.team-sentence-all,.team-prize').forEach(button=>{
   const members=$(`members-${button.dataset.team}`);
   const available=members?[...members.querySelectorAll('.team-member:not(.roulette-eliminated)')]:[];
-  button.disabled=!adminAuthorized||running||rouletteBusy||available.length===0;
+  const eligible=button.classList.contains('team-sentence')||button.classList.contains('team-sentence-all')?available.filter(card=>!card.classList.contains('roulette-sentenced')):available;
+  button.disabled=!adminAuthorized||running||rouletteBusy||eligible.length===0;
   button.title=!adminAuthorized?'Inicia sesión como administrador para eliminar':running?'Espera a que termine el sorteo':available.length?'Seleccionar un jugador activo':'Sin integrantes disponibles';
  });
 }
@@ -215,7 +216,7 @@ $('code-form').addEventListener('submit',async event=>{
  const team=pendingTeam;
  if(team===null||rouletteBusy)return;
  codeDialog.close();
- await roulette(team,code,pendingAction);
+ if(pendingAction==='sentence_team')await sentenceWholeTeam(team,code);else await roulette(team,code,pendingAction);
 });
 async function roulette(team,code,action='eliminate'){
  if(!adminAuthorized||running||rouletteBusy)return;
@@ -258,3 +259,36 @@ async function roulette(team,code,action='eliminate'){
 async function persistSentence(person,code){const {error}=await sg.rpc('supervisor_change_status',{p_player_id:Number(person.id),p_code:code,p_action:'sentence'});if(error)throw Error(error.message);return '';}
 function askSentenceCode(team){if(!adminAuthorized||running||rouletteBusy)return;const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated):not(.roulette-sentenced)')];if(!members.length){sgError('No hay jugadores activos para sentenciar.');return;}pendingTeam=team;pendingAction='sentence';$('code-team').textContent=`SENTENCIAR · EQUIPO ${team+1} · ${members.length} candidatos`;$('code-error').hidden=true;codeInput.value='';codeDialog.showModal();codeInput.focus();}
 async function rafflePrize(team){if(!adminAuthorized||running||rouletteBusy)return;const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated)')];if(!members.length)return;rouletteBusy=true;updatePickButtons();try{const chosen=members[randomIndex(members.length)],person=chosen._participant;const {error}=await sg.rpc('supervisor_award_prize',{p_player_id:Number(person.id),p_team_number:team+1});if(error)throw Error(error.message);showEliminationNotice(person,team,'prize');setMachine('PREMIO SORTEADO',`${person.name} ganó un premio del Equipo ${team+1}.`);}catch(e){sgError('No se pudo registrar el premio: '+e.message)}finally{rouletteBusy=false;updatePickButtons()}}
+
+// Una sola transacción y un único código para todos los miembros activos del equipo.
+function askSentenceTeamCode(team){
+ if(!adminAuthorized||running||rouletteBusy)return;
+ const members=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated):not(.roulette-sentenced)')];
+ if(!members.length){sgError('No hay integrantes activos para sentenciar.');return;}
+ pendingTeam=team;pendingAction='sentence_team';
+ $('code-team').textContent=`SENTENCIAR TODO EL EQUIPO ${team+1} · ${members.length} jugadores · UN SOLO CÓDIGO`;
+ $('code-error').hidden=true;codeInput.value='';codeDialog.showModal();codeInput.focus();
+}
+async function sentenceWholeTeam(team,code){
+ if(!adminAuthorized||running||rouletteBusy)return;
+ const cards=[...$(`members-${team}`).querySelectorAll('.team-member:not(.roulette-eliminated):not(.roulette-sentenced)')];
+ if(!cards.length)return;
+ rouletteBusy=true;updatePickButtons();sgError('');
+ setMachine('SENTENCIANDO EQUIPO',`Validando un código para ${cards.length} participantes del Equipo ${team+1}…`,true);
+ try{
+  const ids=cards.map(card=>Number(card._participant.id));
+  const {data,error}=await sg.rpc('supervisor_sentence_team',{p_player_ids:ids,p_code:code});
+  if(error)throw Error(error.message||'No se pudo sentenciar al equipo.');
+  for(const card of cards){card.classList.add('roulette-sentenced');card._participant.status='sentenced';}
+  const notice=$('team-elimination-notice');clearTimeout(noticeTimer);
+  notice.classList.add('sentencing-notice');notice.querySelector('.notice-out').textContent='EQUIPO SENTENCIADO';
+  $('winner-number').textContent=`EQUIPO ${team+1} · ${cards.length} SENTENCIADOS`;
+  $('winner-name').textContent=`TODOS LOS INTEGRANTES ACTIVOS`;
+  $('winner-text').textContent='El equipo ha sido sentenciado. El tablero se actualizará automáticamente.';
+  $('winner-photo').textContent='⚖️';
+  notice.hidden=false;notice.classList.remove('visible');void notice.offsetWidth;notice.classList.add('visible');
+  noticeTimer=setTimeout(()=>{notice.classList.remove('visible');setTimeout(()=>notice.hidden=true,450)},4600);
+  setMachine('EQUIPO SENTENCIADO',`${cards.length} participantes del Equipo ${team+1} fueron sentenciados con un solo código.`);
+ }catch(error){setMachine('SENTENCIA NO CONFIRMADA','Ningún estado local fue modificado.');sgError('No se pudo sentenciar al equipo: '+(error?.message||String(error)));}
+ finally{rouletteBusy=false;updatePickButtons();}
+}
