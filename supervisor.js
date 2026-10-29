@@ -1,12 +1,12 @@
-// Valida la nueva regla: los dos pares suman 100 y la letra es la inicial del millar.
+// Valida la nueva regla: los dos pares suman 100 y la letra corresponde a la última cifra.
 // Supabase vuelve a validar el código y comprueba que no haya sido utilizado.
 function validarCodigoSupervisor(codigo){
  const match=/^([A-Z])([0-9]{4})$/.exec(String(codigo??'').replace(/\s/g,'').toUpperCase());
  if(!match)return false;
  const digits=match[2];
  if(Number(digits.slice(0,2))+Number(digits.slice(2,4))!==100)return false;
- const iniciales={1:'M',2:'D',3:'T',4:'C',5:'C',6:'S',7:'S',8:'O',9:'N'};
- return match[1]===iniciales[Number(digits[0])];
+ const iniciales={0:'C',1:'U',2:'D',3:'T',4:'C',5:'C',6:'S',7:'S',8:'O',9:'N'};
+ return match[1]===iniciales[Number(digits[3])];
 }
 
 // Voice MVP. No secret OpenAI key is ever placed in this browser code.
