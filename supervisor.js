@@ -1,3 +1,14 @@
+// Valida la nueva regla: los dos pares suman 100 y la letra es la inicial del millar.
+// Supabase vuelve a validar el código y comprueba que no haya sido utilizado.
+function validarCodigoSupervisor(codigo){
+ const match=/^([A-Z])([0-9]{4})$/.exec(String(codigo??'').replace(/\s/g,'').toUpperCase());
+ if(!match)return false;
+ const digits=match[2];
+ if(Number(digits.slice(0,2))+Number(digits.slice(2,4))!==100)return false;
+ const iniciales={1:'M',2:'D',3:'T',4:'C',5:'C',6:'S',7:'S',8:'O',9:'N'};
+ return match[1]===iniciales[Number(digits[0])];
+}
+
 // Voice MVP. No secret OpenAI key is ever placed in this browser code.
 const {sg,sgError}=window;
 const loginPanel=document.getElementById('loginPanel'),voicePanel=document.getElementById('voicePanel');
@@ -272,7 +283,7 @@ async function executeEliminationTool(call){
   try{args=JSON.parse(call.arguments||'{}')}catch{throw Error('No se entendieron los datos de la orden. Repite jugador y código.');}
   const player=Number(args.jugador);
   const code=String(args.codigo??'').toUpperCase().replace(/\s+/g,'');
-  if(!Number.isSafeInteger(player)||player<1||!/^[A-Z][0-9]{4}$/.test(code))throw Error('Indica un número de jugador válido y un código de una letra seguida de cuatro cifras.');
+  if(!Number.isSafeInteger(player)||player<1||!validarCodigoSupervisor(code))throw Error('Indica un número de jugador válido y un código de una letra seguida de cuatro cifras.');
   const {data:{user},error:userError}=await sg.auth.getUser();
   if(userError||!user)throw Error('La sesión del organizador ha caducado.');
   const {data,error}=await sg.rpc('supervisor_eliminate',{p_player_id:player,p_code:code});
@@ -286,7 +297,7 @@ async function executeEliminationTool(call){
   sendVoiceEvent({type:'response.create'});
  }catch(err){sgError('No se pudo comunicar el resultado al Supervisor: '+err.message);}
 }
-async function executeSentenceTool(call){let result;try{const args=JSON.parse(call.arguments||'{}');const player=Number(args.jugador),code=String(args.codigo||'').replace(/\s/g,'').toUpperCase();if(!Number.isSafeInteger(player)||player<1||!/^[A-Z][0-9]{4}$/.test(code))throw Error('Jugador o código inválido.');const {data,error}=await sg.rpc('supervisor_change_status',{p_player_id:player,p_code:code,p_action:'sentence'});if(error)throw Error(error.message);result={ok:true,jugador:player,mensaje:data};}catch(e){result={ok:false,mensaje:e.message};}sendVoiceEvent({type:'conversation.item.create',item:{type:'function_call_output',call_id:call.call_id,output:JSON.stringify(result)}});sendVoiceEvent({type:'response.create'});}
+async function executeSentenceTool(call){let result;try{const args=JSON.parse(call.arguments||'{}');const player=Number(args.jugador),code=String(args.codigo||'').replace(/\s/g,'').toUpperCase();if(!Number.isSafeInteger(player)||player<1||!validarCodigoSupervisor(code))throw Error('Jugador o código inválido.');const {data,error}=await sg.rpc('supervisor_change_status',{p_player_id:player,p_code:code,p_action:'sentence'});if(error)throw Error(error.message);result={ok:true,jugador:player,mensaje:data};}catch(e){result={ok:false,mensaje:e.message};}sendVoiceEvent({type:'conversation.item.create',item:{type:'function_call_output',call_id:call.call_id,output:JSON.stringify(result)}});sendVoiceEvent({type:'response.create'});}
 // Solo una intervención que nombre al Supervisor puede activar una respuesta.
 // Búsqueda flexible por nombre, juego, categoría y descripción, sin exigir frase exacta.
 function normalizeVideoText(value){
@@ -453,7 +464,7 @@ function configureVoiceTools(){
  // Apply the updated character personality for this voice session.
  sendVoiceEvent({type:'session.update',session:{type: 'realtime',instructions:fullSupervisorInstructions(),
    audio:{input:{transcription:{model:'gpt-4o-mini-transcribe'},turn_detection:{type:'server_vad',threshold:0.75,prefix_padding_ms:350,silence_duration_ms:1800,create_response:true,interrupt_response:false}}},
-  tools:[{type:'function',name:SENTENCE_TOOL,description:'Sentencia a un jugador cuando el organizador indica expresamente el ID y un código secreto de una letra y cuatro cifras. No equivale a eliminar.',parameters:{type:'object',properties:{jugador:{type:'integer'},codigo:{type:'string'}},required:['jugador','codigo'],additionalProperties:false}},{type:'function',name:ELIMINATION_TOOL,description:'Cuando el organizador ordene eliminar a un jugador y diga un código de una letra y cuatro dígitos, LLAMA a esta función. No vuelvas a pedir confirmación si ya tienes ambos datos. La función consulta Supabase y devuelve el resultado real.',parameters:{type:'object',properties:{jugador:{type:'integer',description:'ID numérico del jugador.'},codigo:{type:'string',description:'Código de una letra seguida de cuatro dígitos, por ejemplo T2233.'}},required:['jugador','codigo'],additionalProperties:false}},{type:'function',name:VIDEO_TOOL,description:'Controla videos de YouTube en la pantalla de proyección. Úsala cuando el organizador pida explícitamente reproducir, pausar o detener un video durante la conversación activa. Para reproducir, pasa todas las pistas que dio el organizador en nombre: título aproximado, descripción, juego, canción o contexto. No inventes nombres; la herramienta buscará en el catálogo de Supabase y ofrecerá opciones si hay ambigüedad. No afirmes éxito antes de recibir el resultado.',parameters:{type:'object',properties:{accion:{type:'string',enum:['play','pause','stop']},nombre:{type:'string',description:'Nombre del video o del juego cuando la acción sea play'}},required:['accion'],additionalProperties:false}},{type:'function',name:MEMORY_TOOL,description:'Guarda un recuerdo permanente SOLO cuando el organizador lo pide explícitamente, por ejemplo: Supervisor, recuerda que Carlos ganó el juego 2. No guardes rumores, conversaciones privadas, comentarios de invitados ni deducciones.',parameters:{type:'object',properties:{hecho:{type:'string',description:'Hecho breve confirmado por el organizador (máximo 2000 caracteres).'}},required:['hecho'],additionalProperties:false}}],
+  tools:[{type:'function',name:SENTENCE_TOOL,description:'Sentencia a un jugador cuando el organizador indica expresamente el ID y un código secreto de una letra y cuatro cifras. No equivale a eliminar.',parameters:{type:'object',properties:{jugador:{type:'integer'},codigo:{type:'string'}},required:['jugador','codigo'],additionalProperties:false}},{type:'function',name:ELIMINATION_TOOL,description:'Cuando el organizador ordene eliminar a un jugador y diga un código de una letra y cuatro dígitos, LLAMA a esta función. No vuelvas a pedir confirmación si ya tienes ambos datos. La función consulta Supabase y devuelve el resultado real.',parameters:{type:'object',properties:{jugador:{type:'integer',description:'ID numérico del jugador.'},codigo:{type:'string',description:'Código de una letra seguida de cuatro dígitos, por ejemplo T3664.'}},required:['jugador','codigo'],additionalProperties:false}},{type:'function',name:VIDEO_TOOL,description:'Controla videos de YouTube en la pantalla de proyección. Úsala cuando el organizador pida explícitamente reproducir, pausar o detener un video durante la conversación activa. Para reproducir, pasa todas las pistas que dio el organizador en nombre: título aproximado, descripción, juego, canción o contexto. No inventes nombres; la herramienta buscará en el catálogo de Supabase y ofrecerá opciones si hay ambigüedad. No afirmes éxito antes de recibir el resultado.',parameters:{type:'object',properties:{accion:{type:'string',enum:['play','pause','stop']},nombre:{type:'string',description:'Nombre del video o del juego cuando la acción sea play'}},required:['accion'],additionalProperties:false}},{type:'function',name:MEMORY_TOOL,description:'Guarda un recuerdo permanente SOLO cuando el organizador lo pide explícitamente, por ejemplo: Supervisor, recuerda que Carlos ganó el juego 2. No guardes rumores, conversaciones privadas, comentarios de invitados ni deducciones.',parameters:{type:'object',properties:{hecho:{type:'string',description:'Hecho breve confirmado por el organizador (máximo 2000 caracteres).'}},required:['hecho'],additionalProperties:false}}],
   tool_choice:'auto'
  }});
 }

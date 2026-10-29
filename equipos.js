@@ -1,3 +1,14 @@
+// Valida la nueva regla: los dos pares suman 100 y la letra es la inicial del millar.
+// Supabase vuelve a validar el código y comprueba que no haya sido utilizado.
+function validarCodigoSupervisor(codigo){
+ const match=/^([A-Z])([0-9]{4})$/.exec(String(codigo??'').replace(/\s/g,'').toUpperCase());
+ if(!match)return false;
+ const digits=match[2];
+ if(Number(digits.slice(0,2))+Number(digits.slice(2,4))!==100)return false;
+ const iniciales={1:'M',2:'D',3:'T',4:'C',5:'C',6:'S',7:'S',8:'O',9:'N'};
+ return match[1]===iniciales[Number(digits[0])];
+}
+
 
 'use strict';
 const {sg,sgConfigured,sgError,sgPhoto,sgElement}=window;
@@ -232,8 +243,8 @@ codeDialog.addEventListener('close',()=>{pendingTeam=null;codeInput.value='';});
 $('code-form').addEventListener('submit',async event=>{
  event.preventDefault();
  const code=codeInput.value.trim().toUpperCase();
- if(!/^[A-Z][0-9]{4}$/.test(code)){
-  $('code-error').textContent='El código debe tener una letra y cuatro números.';
+ if(!validarCodigoSupervisor(code)){
+  $('code-error').textContent='Código inválido: los dos pares deben sumar 100 y la letra debe corresponder al nombre del número.';
   $('code-error').hidden=false;return;
  }
  const team=pendingTeam;
