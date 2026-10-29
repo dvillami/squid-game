@@ -244,7 +244,7 @@ $('code-form').addEventListener('submit',async event=>{
  event.preventDefault();
  const code=codeInput.value.trim().toUpperCase();
  if(!validarCodigoSupervisor(code)){
-  $('code-error').textContent='Código inválido: los dos pares deben sumar 100 y la letra debe corresponder al nombre del número.';
+  $('code-error').textContent='Código de autorización incorrecto.';
   $('code-error').hidden=false;return;
  }
  const team=pendingTeam;
