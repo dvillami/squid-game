@@ -8,9 +8,18 @@
   try {var saved=JSON.parse(localStorage.getItem('squid-tv-zoom')||'null');if(saved&&saved.mode==='manual'&&typeof saved.scale==='number'&&isFinite(saved.scale)){scale=Math.max(.5,Math.min(1.5,saved.scale));}else if(saved&&saved.mode==='fit')mode='fit';}catch(e){}
   function remember(){try{localStorage.setItem('squid-tv-zoom',JSON.stringify({mode:mode,scale:scale}));}catch(e){}}
   function apply(){
-    stage.style.transform='scale('+scale+')';
-    // Mantener la altura real del documento coherente con el tablero escalado.
-    document.body.style.minHeight=Math.ceil(stage.scrollHeight*scale)+'px';
+    // Centrar el rectángulo escalado, no su esquina superior izquierda.
+    // transform-origin evita que el escalado desplace el punto de referencia.
+    stage.style.transformOrigin='top left';
+    var stageWidth=stage.scrollWidth;
+    var stageHeight=stage.scrollHeight;
+    var scaledWidth=stageWidth*scale;
+    var scaledHeight=stageHeight*scale;
+    var x=Math.max(0,(window.innerWidth-scaledWidth)/2);
+    var y=Math.max(0,(window.innerHeight-scaledHeight)/2);
+    stage.style.transform='translate('+Math.round(x)+'px,'+Math.round(y)+'px) scale('+scale+')';
+    // Evitar que el contenido reducido cree un desplazamiento vertical extra.
+    document.body.style.minHeight=Math.max(window.innerHeight,Math.ceil(y+scaledHeight))+'px';
     value.textContent=Math.round(scale*100)+'%';
     remember();
   }
