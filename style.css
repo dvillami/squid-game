@@ -178,3 +178,11 @@ body.board-page{background:radial-gradient(ellipse at 95% 10%,#57271e 0%,transpa
 .sentencing-notice .notice-out{color:#ffbd50}
 .sentencing-notice .notice-progress{background:#ffae32}
 .sentencing-notice .notice-photo img{filter:none}
+
+/* Zoom exclusivo del tablero, no afecta a administracion ni a otras paginas. */
+#tvBoardStage{width:100%;transform-origin:top left;will-change:transform}
+#tvZoomControls{position:fixed;z-index:10000;right:12px;bottom:12px;display:flex;align-items:center;gap:5px;padding:6px;background:#100e17ed;border:1px solid #ff347c88;border-radius:11px;box-shadow:0 4px 20px #0009;font:700 13px system-ui,sans-serif;color:white}
+#tvZoomControls button{font:700 15px system-ui,sans-serif;padding:7px 11px;min-width:34px;cursor:pointer}
+#tvZoomControls #tvZoomFit{font-size:12px;padding:9px}
+#tvZoomValue{min-width:43px;text-align:center;font-variant-numeric:tabular-nums}
+@media(max-width:580px){#tvZoomControls{right:5px;bottom:5px;padding:4px}#tvZoomControls button{padding:6px 8px}}
